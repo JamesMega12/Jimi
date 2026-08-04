@@ -1,4 +1,5 @@
 import { Document, Paragraph, TextRun, HeadingLevel, Packer, Table, TableRow, TableCell, BorderStyle, WidthType, Header, Footer, AlignmentType, ShadingType, SimpleField } from 'docx';
+import { computeProcedureBands, ComputedBand } from '../utils/procedureBands';
 
 function formatConsistentDate(val: string | undefined): string | undefined {
   if (!val) return val;
@@ -38,7 +39,7 @@ const CELL_MARGINS = { top: 100, bottom: 100, left: 150, right: 150 };
  * Returns paragraphs: the text (with tokens removed) followed by a red, bold
  * placeholder paragraph for each token — matching the "placeholder for now"
  * image handling in the official document. */
-function stepTextToParagraphs(text: string, opts: { bullet?: boolean; bold?: boolean } = {}): Paragraph[] {
+function stepTextToParagraphs(text: string, opts: { number?: number; bold?: boolean } = {}): Paragraph[] {
   const out: Paragraph[] = [];
   const tokenRegex = /\[\s*(?:insert\s+)?(figure|fig\.?|table)\s*(\d+)\s*[:\-–]?\s*([^\]]*)\]/gi;
   const placeholders: { kind: string; num: string; caption: string }[] = [];
@@ -53,9 +54,9 @@ function stepTextToParagraphs(text: string, opts: { bullet?: boolean; bold?: boo
 
   if (cleaned) {
     out.push(new Paragraph({
-      children: [new TextRun({ text: (opts.bullet ? '• ' : '') + cleaned, bold: opts.bold })],
+      children: [new TextRun({ text: (opts.number ? `${opts.number}. ` : '') + cleaned, bold: opts.bold })],
       spacing: { after: 60 },
-      indent: opts.bullet ? { left: 200 } : undefined
+      indent: opts.number ? { left: 200 } : undefined
     }));
   }
   for (const p of placeholders) {
@@ -66,7 +67,7 @@ function stepTextToParagraphs(text: string, opts: { bullet?: boolean; bold?: boo
         color: "C00000"
       })],
       spacing: { before: 60, after: 60 },
-      indent: opts.bullet ? { left: 200 } : undefined
+      indent: opts.number ? { left: 200 } : undefined
     }));
     out.push(new Paragraph({
       children: [new TextRun({
@@ -75,7 +76,7 @@ function stepTextToParagraphs(text: string, opts: { bullet?: boolean; bold?: boo
         size: 18
       })],
       spacing: { after: 80 },
-      indent: opts.bullet ? { left: 200 } : undefined
+      indent: opts.number ? { left: 200 } : undefined
     }));
   }
   return out;
@@ -375,24 +376,14 @@ export async function generateDocxExport(
   // ---------- Procedure (official step-table layout) ----------
   children.push(new Paragraph({ children: [new TextRun({ text: "Procedure:", bold: true, size: 26 })], spacing: { before: 200, after: 120 } }));
 
-  // Map internal sections into the official three bands.
-  const bands = {
-    safetyAndPrep: [] as any[],
-    installation: [] as any[],
-    postInstallation: [] as any[]
-  };
-  if (rewrittenProcedure?.sections && Array.isArray(rewrittenProcedure.sections)) {
-    for (const section of rewrittenProcedure.sections) {
-      const tLower = (section.title || '').toLowerCase();
-      if (tLower.includes('safety') || tLower.includes('preparation')) {
-        bands.safetyAndPrep.push(section);
-      } else if (tLower.includes('implementation') || tLower.includes('update') || tLower.includes('install') || tLower.includes('backup')) {
-        bands.installation.push(section);
-      } else {
-        bands.postInstallation.push(section);
-      }
-    }
-  }
+  // Checks are a canonical array sibling to the procedure (same pattern as
+  // procedureCallouts above), not a field on rewrittenProcedure — they must
+  // survive independently of whatever text landed in a section's steps.
+  const checks = fcoContext?.fcoDraft?.technicalContent?.checks || [];
+  // Band/placement computation is shared with the on-screen review preview
+  // (RewrittenDraft.tsx via procedureBands.ts) so what's previewed always
+  // matches what's exported — do not recompute this here.
+  const computedBands = computeProcedureBands(rewrittenProcedure, checks);
 
   const cleanCalloutLabel = (type: string, text: string) => {
     const prefix = `${type.toUpperCase()}:`;
@@ -403,28 +394,44 @@ export async function generateDocxExport(
     return `${prefix} ${cleaned}`;
   };
 
+  const CHECK_FILL = "FFF1D6"; // distinct from BAND_FILL/HEADER_FILL — visually separates a check from an ordinary step
+  // Checks render as their own row: a checkbox glyph instead of a step number
+  // (they don't consume masterStepNum) and a bold category caption above the
+  // text, so a technician can tell a check apart from an ordinary instruction
+  // at a glance.
+  const checkRow = (check: any): TableRow => {
+    const contentParas: Paragraph[] = [
+      new Paragraph({
+        children: [new TextRun({ text: String(check.category || '').replace(/_/g, ' ').toUpperCase(), bold: true, size: 16, color: "8A5A00" })],
+        spacing: { after: 40 }
+      }),
+      ...stepTextToParagraphs(check.text || '')
+    ];
+    return new TableRow({
+      children: [
+        new TableCell({
+          width: { size: 10, type: WidthType.PERCENTAGE },
+          margins: CELL_MARGINS,
+          shading: { type: ShadingType.CLEAR, color: "auto", fill: CHECK_FILL },
+          children: [new Paragraph({ children: [new TextRun({ text: "☐", bold: true, size: 24 })], alignment: AlignmentType.CENTER })]
+        }),
+        new TableCell({
+          width: { size: 90, type: WidthType.PERCENTAGE },
+          margins: CELL_MARGINS,
+          shading: { type: ShadingType.CLEAR, color: "auto", fill: CHECK_FILL },
+          children: contentParas
+        })
+      ]
+    });
+  };
+
   let masterStepNum = 0;
-  const bandTable = (bandTitle: string, bandSections: any[]) => {
-    // Collect the major step rows of this band: each stepGroup is one row
-    // (bold title + sub-bullets), each flat step is one row.
-    type StepRow = { title?: string; texts: string[] };
-    const stepRows: StepRow[] = [];
-    for (const section of bandSections) {
-      if (Array.isArray(section.stepGroups)) {
-        for (const g of section.stepGroups) {
-          if (g && Array.isArray(g.steps) && g.steps.length > 0) {
-            stepRows.push({ title: g.title, texts: g.steps });
-          }
-        }
-      }
-      if (Array.isArray(section.steps)) {
-        for (const st of section.steps) {
-          const text = typeof st === 'string' ? st : (st?.text || '');
-          if (text) stepRows.push({ texts: [text] });
-        }
-      }
-    }
-    if (stepRows.length === 0) return;
+  const bandTable = (band: ComputedBand) => {
+    const { title: bandTitle, stepRows, preambleChecks, fallbackBeforeChecks, fallbackAfterChecks, checksByStepGroupId } = band;
+
+    const anchoredCheckCount = stepRows.reduce((n, r) =>
+      n + (r.stepGroupId ? (checksByStepGroupId.get(r.stepGroupId)?.before.length || 0) + (checksByStepGroupId.get(r.stepGroupId)?.after.length || 0) : 0), 0);
+    if (stepRows.length === 0 && anchoredCheckCount === 0 && fallbackBeforeChecks.length === 0 && fallbackAfterChecks.length === 0 && preambleChecks.length === 0) return;
 
     const rows: TableRow[] = [];
     rows.push(new TableRow({
@@ -436,7 +443,11 @@ export async function generateDocxExport(
       })]
     }));
 
-    // Safety callouts for this band go right under the band header.
+    // safety_preparation checks render as a preamble right under the band
+    // header — read before the step table begins, not tied to one step.
+    preambleChecks.forEach(c => rows.push(checkRow(c)));
+
+    // Safety callouts for this band go right under the band header (after any preamble checks).
     const matchedCallouts = procedureCallouts.filter((c: any) =>
       c.section && (c.section.toLowerCase() === bandTitle.toLowerCase() || bandTitle.toLowerCase().includes(c.section.toLowerCase()))
     );
@@ -474,42 +485,56 @@ export async function generateDocxExport(
       ]
     }));
 
+    // Checks whose category means "before the work starts" (pre_installation,
+    // parts_check, functional_check) and have no specific anchor render here
+    // — right after the column header, before the first step row.
+    fallbackBeforeChecks.forEach(c => rows.push(checkRow(c)));
+
     for (const stepRow of stepRows) {
+      const anchored = stepRow.stepGroupId ? checksByStepGroupId.get(stepRow.stepGroupId) : undefined;
+      (anchored?.before || []).forEach(c => rows.push(checkRow(c)));
+
       masterStepNum++;
       const contentParas: Paragraph[] = [];
       if (stepRow.title) {
         stepTextToParagraphs(stepRow.title, { bold: true }).forEach(p => contentParas.push(p));
-        for (const sub of stepRow.texts) {
-          stepTextToParagraphs(sub, { bullet: true }).forEach(p => contentParas.push(p));
-        }
+        stepRow.texts.forEach((sub, subIdx) => {
+          stepTextToParagraphs(sub, { number: subIdx + 1 }).forEach(p => contentParas.push(p));
+        });
       } else {
         stepTextToParagraphs(stepRow.texts[0]).forEach(p => contentParas.push(p));
       }
-      if (contentParas.length === 0) continue;
+      if (contentParas.length > 0) {
+        rows.push(new TableRow({
+          children: [
+            new TableCell({
+              width: { size: 10, type: WidthType.PERCENTAGE },
+              margins: CELL_MARGINS,
+              children: [new Paragraph({ children: [new TextRun({ text: String(masterStepNum), bold: true })], alignment: AlignmentType.CENTER })]
+            }),
+            new TableCell({
+              width: { size: 90, type: WidthType.PERCENTAGE },
+              margins: CELL_MARGINS,
+              children: contentParas
+            })
+          ]
+        }));
+      }
 
-      rows.push(new TableRow({
-        children: [
-          new TableCell({
-            width: { size: 10, type: WidthType.PERCENTAGE },
-            margins: CELL_MARGINS,
-            children: [new Paragraph({ children: [new TextRun({ text: String(masterStepNum), bold: true })], alignment: AlignmentType.CENTER })]
-          }),
-          new TableCell({
-            width: { size: 90, type: WidthType.PERCENTAGE },
-            margins: CELL_MARGINS,
-            children: contentParas
-          })
-        ]
-      }));
+      (anchored?.after || []).forEach(c => rows.push(checkRow(c)));
     }
+
+    // Checks whose category means "after the work is done" (post_installation_check,
+    // completion_verification) and have no specific anchor render here, at the
+    // end — every category maps to one of the three bands, so this is always a
+    // valid fallback, never a silent drop.
+    fallbackAfterChecks.forEach(c => rows.push(checkRow(c)));
 
     children.push(new Table({ rows, width: { size: 100, type: WidthType.PERCENTAGE }, borders: BORDERS }));
     children.push(new Paragraph({ spacing: { after: 150 } }));
   };
 
-  bandTable("Safety and Preparation", bands.safetyAndPrep);
-  bandTable("Installation Steps", bands.installation);
-  bandTable("Post-Installation / Functional Check", bands.postInstallation);
+  computedBands.forEach(band => bandTable(band));
 
   // ---------- References ----------
   children.push(new Paragraph({ children: [new TextRun({ text: "Reference", bold: true })], spacing: { before: 200, after: 80 } }));

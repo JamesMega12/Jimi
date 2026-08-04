@@ -34,7 +34,7 @@ export default function AppShell() {
         >
           <div className="font-bold text-xl tracking-tight flex items-center gap-2">
             <Settings2 className="w-6 h-6 text-indigo-400" />
-            TechCom Document Workspace
+            Jimi
           </div>
         </div>
         <div className="flex gap-3">

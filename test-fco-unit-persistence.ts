@@ -49,6 +49,31 @@ assert(loaded?.currentStep === 2, 'currentStep round-trips');
 assert(loaded?.formData?.fcoDraft?.technicalContent?.acceptedSummary === 'ACCEPTED summary paragraph.', 'accepted canonical content round-trips');
 assert(loaded?.formData?.title === 'SLB-400 O-ring Upgrade', 'top-level draft field round-trips');
 
+console.log('\nLegacy declaredParts backfill (additive, not a schemaVersion bump):');
+reset();
+const legacyDraft: any = {
+  title: 'Legacy draft',
+  fcoDraft: {
+    fcoMetadata: { fcoTitle: 'Legacy draft', priority: 'Required' },
+    technicalContent: {
+      draftSummary: '',
+      declaredParts: [
+        { name: 'Legacy Part A', identifier: 'LP-A', role: 'installed', relatedTo: [] }, // no id -- pre-checks-feature shape
+        { id: 'already-has-id', name: 'Legacy Part B', identifier: 'LP-B', role: 'installed', relatedTo: [] },
+      ],
+    },
+  },
+};
+store.set(KEY, JSON.stringify({ schemaVersion: 1, formData: legacyDraft, currentStep: 1 }));
+const backfilled = loadFcoState();
+assert(!!backfilled, 'a legacy draft with id-less declaredParts loads without rejection (no schemaVersion bump)');
+const parts = backfilled?.formData?.fcoDraft?.technicalContent?.declaredParts || [];
+assert(
+  parts.length === 2 && typeof parts[0].id === 'string' && parts[0].id.length > 0,
+  'a declaredPart missing an id is backfilled with a freshly minted one'
+);
+assert(parts[1].id === 'already-has-id', 'a declaredPart that already has an id keeps it unchanged');
+
 console.log('\nclear():');
 clearFcoState();
 assert(loadFcoState() === null, 'load after clear returns null');

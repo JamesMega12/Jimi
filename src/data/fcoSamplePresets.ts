@@ -58,12 +58,12 @@ export const fcoSamplePreset: FcoDraft = {
     existingReferences: '',
     optionalRewriteInstructions: '',
     declaredParts: [
-      { name: 'DM-500 discharge manifold clamp assembly', identifier: '105771900', role: 'replaced', relatedTo: [] },
-      { name: 'High-wear clamp kit', identifier: '109884210', role: 'installed', relatedTo: ['DM-500 discharge manifold clamp assembly'] },
-      { name: 'Coated fasteners', identifier: '109884211', role: 'installed', relatedTo: ['High-wear clamp kit'] },
-      { name: 'Inspection washers', identifier: '109884212', role: 'installed', relatedTo: ['High-wear clamp kit'] },
-      { name: 'Alignment guide tool', identifier: '109884213', role: 'tool', relatedTo: ['High-wear clamp kit'] },
-      { name: 'DM-500 discharge manifold hub', identifier: '105771902', role: 'inspected', relatedTo: [] }
+      { id: 'fco-sample-part-clamp-assembly', name: 'DM-500 discharge manifold clamp assembly', identifier: '105771900', role: 'replaced', relatedTo: [] },
+      { id: 'fco-sample-part-clamp-kit', name: 'High-wear clamp kit', identifier: '109884210', role: 'installed', relatedTo: ['DM-500 discharge manifold clamp assembly'] },
+      { id: 'fco-sample-part-fasteners', name: 'Coated fasteners', identifier: '109884211', role: 'installed', relatedTo: ['High-wear clamp kit'] },
+      { id: 'fco-sample-part-washers', name: 'Inspection washers', identifier: '109884212', role: 'installed', relatedTo: ['High-wear clamp kit'] },
+      { id: 'fco-sample-part-alignment-tool', name: 'Alignment guide tool', identifier: '109884213', role: 'tool', relatedTo: ['High-wear clamp kit'] },
+      { id: 'fco-sample-part-hub', name: 'DM-500 discharge manifold hub', identifier: '105771902', role: 'inspected', relatedTo: [] }
     ],
     procedureCallouts: [],
     procedureReadinessSuggestions: []

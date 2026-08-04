@@ -75,6 +75,7 @@ export default function Step3Review({
               summary={summaryObj as any}
               procedure={acceptedProcedure as any}
               procedureCallouts={formData.fcoDraft?.technicalContent?.procedureCallouts}
+              checks={formData.fcoDraft?.technicalContent?.checks}
             />
           )}
         </div>

@@ -78,7 +78,7 @@ export default function Header({ diagnostics, loading, onOpenKbAdmin, onOpenDevK
             </div>
             <div>
               <h1 className="text-2xl font-bold text-slate-900 tracking-tight font-sans">
-                FCO Draft Assistant
+                Jimi
               </h1>
               <p className="text-sm text-slate-500 font-sans mt-0.5 font-medium">
                 AI-Powered FCO Drafting

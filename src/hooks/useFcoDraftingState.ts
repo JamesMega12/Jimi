@@ -1,6 +1,6 @@
 import { useState, useRef, Dispatch, SetStateAction } from 'react';
 import { FCORequestData, FCOProcedure, FCOSummary, FcoSummaryAnalysis, ProcedureReadinessSuggestion, FCOPartInvolved, FCODiagnostics } from '../types';
-import { buildDisplayProcedure } from '../utils/procedureMerge';
+import { stampProcedureIdentity, mergeAcceptedChecks } from '../utils/procedureMerge';
 import { parseJsonResponse } from '../utils/apiResponse';
 import { createGuard, begin, bump, isCurrent, isInFlight, settle, ownsLoading } from './fcoRequestGuard';
 
@@ -69,7 +69,8 @@ export function useFcoDraftingState(
     handleDraftChange('technicalContent', 'declaredParts', parts);
   };
   const addDeclaredPart = () => {
-    updateDeclaredParts([...declaredParts, { name: '', identifier: '', role: 'installed', relatedTo: [] }]);
+    const id = crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).substring(2, 15);
+    updateDeclaredParts([...declaredParts, { id, name: '', identifier: '', role: 'installed', relatedTo: [] }]);
   };
   const updateDeclaredPart = (idx: number, field: 'name' | 'identifier' | 'role', value: string) => {
     const next = declaredParts.map((p, i) => i === idx ? { ...p, [field]: value } : p);
@@ -162,7 +163,10 @@ export function useFcoDraftingState(
           ...draft.technicalContent,
           acceptedProcedure: undefined,
           acceptedProcedureDiagnostics: undefined,
-          procedureReadinessSuggestions: []
+          procedureReadinessSuggestions: [],
+          // Checks reference ids stamped onto this one accepted procedure
+          // snapshot (parts/stepGroups) — they cannot outlive it.
+          checks: []
         };
       }
 
@@ -371,12 +375,20 @@ export function useFcoDraftingState(
 
   const handleAcceptProcedure = () => {
       if (!generatedProcedure) return;
-      // Bake accepted/edited readiness suggestions into the procedure steps
-      // exactly once, here — the accepted state, final review, and the DOCX
-      // export all read this same acceptedProcedure directly with no further
-      // merge, so readiness can never be double-applied downstream.
-      const merged = buildDisplayProcedure(generatedProcedure, readinessSuggestions);
-      handleDraftChange('technicalContent', 'acceptedProcedure', merged);
+      // Stamp stable ids onto parts/stepGroups before this snapshot becomes
+      // canonical — accept time is the one point a procedure's identity can
+      // be fixed (see stampProcedureIdentity's doc comment).
+      const stamped = stampProcedureIdentity(generatedProcedure, declaredParts);
+      // Turn accepted/edited readiness suggestions into structured checks —
+      // exactly once, here — preserving category/reason/id/source instead of
+      // flattening them into anonymous procedure steps. The accepted state,
+      // final review, and the DOCX export all read this same acceptedProcedure
+      // + checks directly with no further merge, so a suggestion can never be
+      // double-applied downstream.
+      const existingChecks = formData.fcoDraft?.technicalContent?.checks || [];
+      const mergedChecks = mergeAcceptedChecks(existingChecks, readinessSuggestions, stamped);
+      handleDraftChange('technicalContent', 'acceptedProcedure', stamped);
+      handleDraftChange('technicalContent', 'checks', mergedChecks);
       handleDraftChange('technicalContent', 'acceptedProcedureDiagnostics', pendingProcedureDiagnostics || undefined);
       handleDraftChange('technicalContent', 'procedureReadinessSuggestions', []);
       setGeneratedProcedure(null);
