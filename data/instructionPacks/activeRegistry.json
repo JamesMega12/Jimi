@@ -1,0 +1,12 @@
+{
+  "summary": {
+    "activePackId": "summary-pack-default",
+    "source": "bundled_default",
+    "history": []
+  },
+  "procedure": {
+    "activePackId": "procedure-pack-default",
+    "source": "bundled_default",
+    "history": []
+  }
+}

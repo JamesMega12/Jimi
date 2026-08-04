@@ -1,0 +1,40 @@
+PHASE UI-2F QA REPORT
+
+Tested:
+- src/components/AppWorkflow.tsx
+- src/components/Step1Context.tsx
+- src/components/Step2Content.tsx
+- src/components/Step3Review.tsx
+- src/components/AiReviewStudio.tsx
+- src/components/ExportPanel.tsx
+
+Passed:
+- Step 1 renders AiReviewStudio correctly and retains error handling without kicking the user out of the Draft workspace.
+- Step 2 properly hosts AdvancedMetadataPanel and FcoTablesEditor.
+- Step 3 cleanly composes the final review UI (RewrittenDraft, ProcedureReadinessPanel, ValidationChecklist, ExportPanel) without redundant logic.
+- Readiness lifecycle merges approved/edited suggestions dynamically in preview mode and DOCX export.
+- Placeholder validations continue to trigger critical warnings when mismatches are detected.
+- Navigation bounds correctly transition between Step 1 -> Step 2 -> Step 3.
+
+Bugs Found:
+- Unused `setCurrentStep(2)` in `AppWorkflow.tsx` `handleRewriteSubmit` catch block.
+
+Fixes Applied:
+- Removed the legacy `setCurrentStep(2)` redirect inside `AppWorkflow.tsx` error block so that a failed AI rewrite appropriately leaves the user in Step 1 to review the error message.
+
+Architecture Confirmation:
+- canonical fcoDraft sync preserved
+- legacy sync preserved where required
+- no Gemini calls added to export
+- no RAG/source retrieval added to export
+- no schema changes
+- no prompt/instruction-pack changes
+- no readiness lifecycle changes
+- no placeholder validation changes
+
+Validation:
+- npm run lint: PASS
+- npm run build: PASS
+
+Recommendation:
+- Ready to resume Phase D1c follow-up / D1d export polish. No blockers found.

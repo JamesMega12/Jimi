@@ -1,0 +1,8 @@
+{
+  "name": "techalert announcement agent",
+  "description": "Rewrite Field Change Order (FCO) draft content into a clearer, safer, operator-friendly format for TechCom review.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

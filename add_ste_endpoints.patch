@@ -1,0 +1,92 @@
+--- server.ts
++++ server.ts
+@@ -19,6 +19,7 @@
+ import { ingestDocument } from './src/server/documentIngestionService';
++import { ingestSteDocument, reindexSteDocument } from './src/server/steIngestionService';
+ import { retrieveRelevantChunks, retrieveRelevantChunksForQuery, filterChunksBySettings } from './src/server/retrievalService';
+ import { buildGroundingPromptContext } from './src/server/groundingContextBuilder';
+@@ -796,16 +797,19 @@
+ 
+ app.get('/api/fco/instruction-packs/status', devKnowledgeGuard, async (req, res) => {
+   try {
+     const docs = getDocuments();
+-    const isEnabled = docs.some((d: any) => d.name && d.name.includes('STE_QRG_6861590'));
++    const steDoc = docs.find((d: any) => d.name && d.name.includes('STE_QRG_6861590'));
++    const isEnabled = !!steDoc;
+     
+     const steGuidanceStatus = {
+       status: isEnabled ? 'available' : 'unknown',
+       documentName: 'STE_QRG_6861590_AC-Sep-2022 Online_6861590_01.pdf',
+       mode: "ste_only",
+       purpose: "writing_guidance_only",
+-      runtimeRetrievalEnabled: isEnabled
++      runtimeRetrievalEnabled: isEnabled,
++      indexed: steDoc ? steDoc.status === 'indexed' : false,
++      chunkCount: steDoc ? steDoc.chunkCount : 0,
++      lastIndexedAt: steDoc ? steDoc.indexedAt : null
+     };
+ 
+     const activeRegistry = getActiveRegistry();
+@@ -829,6 +833,63 @@
+     res.status(500).json({ error: err.message });
+   }
+ });
++
++app.post('/api/fco/ste-guidance/upload', devKnowledgeGuard, async (req, res) => {
++  try {
++    const { content } = req.body;
++    if (!content) return res.status(400).json({ error: 'Missing content.' });
++    
++    const docs = getDocuments();
++    const existing = docs.filter((d: any) => d.name && d.name.includes('STE_QRG_6861590'));
++    for (const d of existing) deleteDocument(d.id);
++    
++    const name = 'STE_QRG_6861590_AC-Sep-2022 Online_6861590_01.pdf';
++    const type = 'STE_LANGUAGE_GUIDE';
++    const version = '1.0';
++
++    const uploadsDir = path.join(process.cwd(), 'src', 'server', 'data', 'uploads');
++    if (!fs.existsSync(uploadsDir)) fs.mkdirSync(uploadsDir, { recursive: true });
++    const tempPath = path.join(uploadsDir, `${Date.now()}-${path.basename(name)}`);
++
++    let fileBuffer: Buffer;
++    if (content.startsWith('data:') && content.includes(';base64,')) {
++      fileBuffer = Buffer.from(content.split(';base64,')[1], 'base64');
++    } else {
++      fileBuffer = Buffer.from(content, 'utf-8');
++    }
++    fs.writeFileSync(tempPath, fileBuffer);
++
++    const diag = await ingestSteDocument(tempPath, name, type, version);
++    fs.unlinkSync(tempPath);
++    return res.json({ success: true, diag });
++  } catch (err: any) {
++    res.status(500).json({ error: err.message });
++  }
++});
++
++app.delete('/api/fco/ste-guidance', devKnowledgeGuard, async (req, res) => {
++  try {
++    const docs = getDocuments();
++    const existing = docs.filter((d: any) => d.name && d.name.includes('STE_QRG_6861590'));
++    for (const d of existing) deleteDocument(d.id);
++    return res.json({ success: true });
++  } catch (err: any) {
++    res.status(500).json({ error: err.message });
++  }
++});
++
++app.post('/api/fco/ste-guidance/reindex', devKnowledgeGuard, async (req, res) => {
++  try {
++    const docs = getDocuments();
++    const existing = docs.find((d: any) => d.name && d.name.includes('STE_QRG_6861590'));
++    if (!existing) return res.status(404).json({ error: 'STE Guidance Document not found.' });
++    await reindexSteDocument(existing.id);
++    return res.json({ success: true });
++  } catch (err: any) {
++    res.status(500).json({ error: err.message });
++  }
++});
++
+ 
+ app.get('/api/fco/instruction-packs/drafts', devKnowledgeGuard, async (req, res) => {
