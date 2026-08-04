@@ -1,22 +1,30 @@
 import React, { useState } from 'react';
-import { ProcedureReadinessSuggestion } from '../types';
+import { FCOPartInvolved, FCOProcedure, ProcedureReadinessSuggestion } from '../types';
 import { AlertCircle, CheckCircle2, XCircle, FileEdit, Check, X } from 'lucide-react';
+import { collectAnchorTitleOptions, collectPartNameOptions } from './procedureTargetOptions';
 
 interface ProcedureReadinessPanelProps {
   suggestions: ProcedureReadinessSuggestion[];
   onUpdateSuggestions: (suggestions: ProcedureReadinessSuggestion[]) => void;
   developerMode?: boolean;
+  generatedProcedure?: FCOProcedure | null;
+  declaredParts?: FCOPartInvolved[];
 }
 
 export default function ProcedureReadinessPanel({
   suggestions,
   onUpdateSuggestions,
-  developerMode
+  developerMode,
+  generatedProcedure,
+  declaredParts = []
 }: ProcedureReadinessPanelProps) {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editValue, setEditValue] = useState('');
 
   if (!suggestions || suggestions.length === 0) return null;
+
+  const partNameOptions = collectPartNameOptions(declaredParts, generatedProcedure);
+  const anchorTitleOptions = collectAnchorTitleOptions(generatedProcedure);
 
   const handleAccept = (id: string) => {
     const next = suggestions.map(s => s.id === id ? { ...s, status: 'accepted' as const } : s);
@@ -35,7 +43,7 @@ export default function ProcedureReadinessPanel({
 
   const handleSaveEdit = (id: string) => {
     if (!editValue.trim()) return;
-    const next = suggestions.map(s => 
+    const next = suggestions.map(s =>
       s.id === id ? { ...s, editedText: editValue, status: 'edited' as const } : s
     );
     onUpdateSuggestions(next);
@@ -46,6 +54,20 @@ export default function ProcedureReadinessPanel({
   const handleCancelEdit = () => {
     setEditingId(null);
     setEditValue('');
+  };
+
+  // AI proposes a target by name/title (never an id — ids don't exist yet at
+  // this stage); confirmedX overrides suggestedX and is what actually gets
+  // resolved to real ids in mergeAcceptedChecks when the procedure is accepted.
+  const updateTarget = (id: string, patch: Partial<Pick<ProcedureReadinessSuggestion, 'confirmedPartNames' | 'confirmedStepGroupTitle' | 'confirmedAnchorPosition'>>) => {
+    const next = suggestions.map(s => s.id === id ? { ...s, ...patch } : s);
+    onUpdateSuggestions(next);
+  };
+
+  const toggleTargetPart = (s: ProcedureReadinessSuggestion, name: string) => {
+    const current = s.confirmedPartNames ?? s.suggestedPartNames ?? [];
+    const has = current.includes(name);
+    updateTarget(s.id, { confirmedPartNames: has ? current.filter(n => n !== name) : [...current, name] });
   };
 
   const pendingCount = suggestions.filter(s => s.status === 'pending').length;
@@ -70,18 +92,25 @@ export default function ProcedureReadinessPanel({
           const isEditing = editingId === s.id;
 
           const displayText = s.editedText || s.suggestedText;
+          const partNames = s.confirmedPartNames ?? s.suggestedPartNames ?? [];
+          const stepGroupTitle = s.confirmedStepGroupTitle ?? s.suggestedStepGroupTitle;
+          const anchorPosition = s.confirmedAnchorPosition ?? s.suggestedAnchorPosition;
+          const anchorSelectValue =
+            stepGroupTitle && anchorPosition
+              ? `${anchorTitleOptions.findIndex(o => o.stepGroupTitle.toLowerCase() === stepGroupTitle.toLowerCase())}:${anchorPosition}`
+              : '';
 
           return (
-            <div 
-              key={s.id} 
+            <div
+              key={s.id}
               className={`border rounded-md p-3 transition-colors ${
-                isAccepted ? 'bg-green-50/50 border-green-200' : 
-                isDismissed ? 'bg-slate-50/50 border-slate-200 opacity-60' : 
+                isAccepted ? 'bg-green-50/50 border-green-200' :
+                isDismissed ? 'bg-slate-50/50 border-slate-200 opacity-60' :
                 'bg-white border-indigo-100 hover:border-indigo-300'
               }`}
             >
               <div className="flex justify-between items-start gap-4 mb-2">
-                <div>
+                <div className="flex-1">
                   <div className="flex items-center gap-2 mb-1.5">
                     <span className="text-xxs font-bold uppercase tracking-wider text-indigo-600 bg-indigo-50 px-1.5 py-0.5 rounded">
                       {s.category.replace(/_/g, ' ')}
@@ -102,7 +131,7 @@ export default function ProcedureReadinessPanel({
                       </span>
                     )}
                   </div>
-                  
+
                   {isEditing ? (
                     <div className="mt-2">
                       <textarea
@@ -138,6 +167,67 @@ export default function ProcedureReadinessPanel({
                       AI Reason: {s.reason}
                     </p>
                   )}
+
+                  {!isDismissed && !isEditing && (
+                    <div className="mt-2.5 pt-2.5 border-t border-slate-100 space-y-2">
+                      <div>
+                        <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wide mb-1">Applies to</label>
+                        <div className="flex flex-wrap gap-1.5">
+                          <button
+                            type="button"
+                            onClick={() => updateTarget(s.id, { confirmedPartNames: [] })}
+                            className={`text-[10px] font-semibold px-2 py-1 rounded border ${
+                              partNames.length === 0
+                                ? 'bg-indigo-50 border-indigo-300 text-indigo-700'
+                                : 'bg-white border-slate-300 text-slate-600'
+                            }`}
+                          >
+                            Global (all parts)
+                          </button>
+                          {partNameOptions.map(name => (
+                            <button
+                              type="button"
+                              key={name}
+                              onClick={() => toggleTargetPart(s, name)}
+                              className={`text-[10px] font-semibold px-2 py-1 rounded border ${
+                                partNames.includes(name)
+                                  ? 'bg-indigo-50 border-indigo-300 text-indigo-700'
+                                  : 'bg-white border-slate-300 text-slate-600'
+                              }`}
+                            >
+                              {name}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                      <div>
+                        <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wide mb-1">Placement</label>
+                        <select
+                          value={anchorSelectValue}
+                          onChange={e => {
+                            const v = e.target.value;
+                            if (!v) {
+                              updateTarget(s.id, { confirmedStepGroupTitle: '', confirmedAnchorPosition: undefined });
+                              return;
+                            }
+                            const sepIdx = v.indexOf(':');
+                            const optIdx = Number(v.slice(0, sepIdx));
+                            const position = v.slice(sepIdx + 1) as 'before' | 'after';
+                            const opt = anchorTitleOptions[optIdx];
+                            if (!opt) return;
+                            updateTarget(s.id, { confirmedStepGroupTitle: opt.stepGroupTitle, confirmedAnchorPosition: position });
+                          }}
+                          className="w-full text-xs p-1.5 border border-slate-300 rounded focus:ring-2 focus:ring-indigo-500"
+                        >
+                          <option value="">No specific step (whole procedure)</option>
+                          {anchorTitleOptions.flatMap((opt, idx) => [
+                            <option key={`${idx}:before`} value={`${idx}:before`}>Before — {opt.label}</option>,
+                            <option key={`${idx}:after`} value={`${idx}:after`}>After — {opt.label}</option>,
+                          ])}
+                        </select>
+                      </div>
+                    </div>
+                  )}
                 </div>
 
                 {!isEditing && isPending && (
@@ -162,7 +252,7 @@ export default function ProcedureReadinessPanel({
                     </button>
                   </div>
                 )}
-                
+
                 {!isEditing && !isPending && (
                    <div className="flex flex-col gap-1.5 flex-shrink-0">
                     <button

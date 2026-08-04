@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { FCOProcedure } from '../types';
 import { Pencil } from 'lucide-react';
+import { computeProcedureBands } from '../utils/procedureBands';
 
 interface Props {
   procedure: FCOProcedure;
@@ -12,6 +13,14 @@ interface Props {
  * Click any step line (or group title) to edit it in place. Edits mutate a
  * cloned copy passed back via onChange, so the caller's state stays the
  * single source of truth.
+ *
+ * Grouped into the same 3 bands (Safety and Preparation / Installation Steps
+ * / Completion & Functional Check) as the accepted-procedure preview and the
+ * DOCX export — see procedureBands.ts — with continuous step numbering
+ * across each band, so what you edit here matches what you'll see after
+ * accepting and exporting. Edit keys still address the underlying
+ * procedure.sections[]/stepGroups[] by their real index — bands only change
+ * how this is grouped for display, not the canonical shape being edited.
  */
 export default function EditableProcedureView({ procedure, onChange }: Props) {
   // Editing target encoded as "sectionIdx:flat:stepIdx", "sectionIdx:group:groupIdx:stepIdx"
@@ -86,6 +95,9 @@ export default function EditableProcedureView({ procedure, onChange }: Props) {
     );
   };
 
+  const bands = computeProcedureBands(procedure, []);
+  let stepNum = 0;
+
   return (
     <div className="space-y-5">
       <div className="flex items-center justify-between">
@@ -112,56 +124,76 @@ export default function EditableProcedureView({ procedure, onChange }: Props) {
         </div>
       ))}
 
-      {procedure.sections.map((section, sIdx) => (
-        <div key={sIdx} className="border border-slate-200 rounded-xl p-4 bg-slate-50/20 text-sm space-y-3">
-          <h4 className="text-sm font-bold text-slate-900 border-b border-slate-200 pb-1.5 font-sans">
-            {section.title}
-          </h4>
+      {bands.map(band => {
+        const hasContent = band.sections.some(s => (s.stepGroups && s.stepGroups.length > 0) || (s.steps && s.steps.length > 0));
+        if (!hasContent) return null;
 
-          {section.stepGroups && section.stepGroups.length > 0 && (
-            <div className="space-y-3">
-              {section.stepGroups.map((group, gIdx) => (
-                <div key={gIdx} className="bg-white border border-slate-200 rounded-lg overflow-hidden">
-                  <div className="flex items-center gap-2.5 px-3 py-2 bg-slate-50 border-b border-slate-200">
-                    <span className="w-5 h-5 flex items-center justify-center bg-indigo-100 rounded-full text-xs font-bold text-indigo-700 font-mono flex-shrink-0">
-                      {gIdx + 1}
-                    </span>
-                    <div className="flex-1 text-sm font-bold text-slate-800">
-                      {editableLine(`${sIdx}:gtitle:${gIdx}`, group.title, '')}
+        return (
+          <div key={band.key} className="border border-slate-200 rounded-xl p-4 bg-slate-50/20 text-sm space-y-3">
+            <h4 className="text-sm font-bold text-slate-900 border-b border-slate-200 pb-1.5 font-sans">
+              {band.title}
+            </h4>
+
+            {band.sections.map(section => {
+              const sIdx = procedure.sections.indexOf(section);
+              return (
+                <React.Fragment key={sIdx}>
+                  {section.stepGroups && section.stepGroups.length > 0 && (
+                    <div className="space-y-3">
+                      {section.stepGroups.map((group, gIdx) => {
+                        stepNum++;
+                        const n = stepNum;
+                        return (
+                          <div key={gIdx} className="bg-white border border-slate-200 rounded-lg overflow-hidden">
+                            <div className="flex items-center gap-2.5 px-3 py-2 bg-slate-50 border-b border-slate-200">
+                              <span className="w-5 h-5 flex items-center justify-center bg-indigo-100 rounded-full text-xs font-bold text-indigo-700 font-mono flex-shrink-0">
+                                {n}
+                              </span>
+                              <div className="flex-1 text-sm font-bold text-slate-800">
+                                {editableLine(`${sIdx}:gtitle:${gIdx}`, group.title, '')}
+                              </div>
+                              {group.forPart && (
+                                <span className="text-[10px] uppercase font-bold text-indigo-600 bg-indigo-50 border border-indigo-100 px-1.5 py-0.5 rounded flex-shrink-0">
+                                  {group.forPart}
+                                </span>
+                              )}
+                            </div>
+                            <ul className="divide-y divide-slate-100">
+                              {group.steps.map((step, stepIdx) => (
+                                <li key={stepIdx} className="flex gap-3 p-2.5 pl-5 text-slate-700 text-sm">
+                                  <span className="text-slate-400 flex-shrink-0 font-mono text-xs mt-0.5">{stepIdx + 1}.</span>
+                                  <div className="flex-1">{editableLine(`${sIdx}:group:${gIdx}:${stepIdx}`, step, '')}</div>
+                                </li>
+                              ))}
+                            </ul>
+                          </div>
+                        );
+                      })}
                     </div>
-                    {group.forPart && (
-                      <span className="text-[10px] uppercase font-bold text-indigo-600 bg-indigo-50 border border-indigo-100 px-1.5 py-0.5 rounded flex-shrink-0">
-                        {group.forPart}
-                      </span>
-                    )}
-                  </div>
-                  <ul className="divide-y divide-slate-100">
-                    {group.steps.map((step, stepIdx) => (
-                      <li key={stepIdx} className="flex gap-3 p-2.5 pl-5 text-slate-700 text-sm">
-                        <span className="text-slate-400 flex-shrink-0">•</span>
-                        <div className="flex-1">{editableLine(`${sIdx}:group:${gIdx}:${stepIdx}`, step, '')}</div>
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-              ))}
-            </div>
-          )}
+                  )}
 
-          {section.steps && section.steps.length > 0 && (
-            <ol className="divide-y divide-slate-100 bg-white border border-slate-200 rounded-lg overflow-hidden">
-              {section.steps.map((step, stepIdx) => (
-                <li key={stepIdx} className="flex gap-3.5 p-3 text-slate-700">
-                  <span className="w-5 h-5 flex items-center justify-center bg-slate-100 rounded-full text-xs font-bold text-slate-600 font-mono flex-shrink-0">
-                    {(section.stepGroups?.length || 0) + stepIdx + 1}
-                  </span>
-                  <div className="flex-1">{editableLine(`${sIdx}:flat:${stepIdx}`, step, '')}</div>
-                </li>
-              ))}
-            </ol>
-          )}
-        </div>
-      ))}
+                  {section.steps && section.steps.length > 0 && (
+                    <ol className="divide-y divide-slate-100 bg-white border border-slate-200 rounded-lg overflow-hidden">
+                      {section.steps.map((step, stepIdx) => {
+                        stepNum++;
+                        const n = stepNum;
+                        return (
+                          <li key={stepIdx} className="flex gap-3.5 p-3 text-slate-700">
+                            <span className="w-5 h-5 flex items-center justify-center bg-slate-100 rounded-full text-xs font-bold text-slate-600 font-mono flex-shrink-0">
+                              {n}
+                            </span>
+                            <div className="flex-1">{editableLine(`${sIdx}:flat:${stepIdx}`, step, '')}</div>
+                          </li>
+                        );
+                      })}
+                    </ol>
+                  )}
+                </React.Fragment>
+              );
+            })}
+          </div>
+        );
+      })}
     </div>
   );
 }

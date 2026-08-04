@@ -37,6 +37,17 @@ export function loadFcoState(): { formData: FCORequestData; currentStep: number 
       typeof parsed.currentStep === "number" && parsed.currentStep >= 1 && parsed.currentStep <= 4
         ? parsed.currentStep
         : 1;
+    // Additive backfill, not a schema bump: drafts saved before checks/part-ids
+    // existed have declaredParts with no id. Backfilling here (rather than
+    // rejecting on schemaVersion mismatch) means an in-flight draft is never
+    // discarded for a purely additive change -- legacy parts just can't be
+    // targeted by a check's targetPartIds until backfilled.
+    const declaredParts = parsed.formData.fcoDraft?.technicalContent?.declaredParts;
+    if (Array.isArray(declaredParts) && declaredParts.some((p: any) => !p?.id)) {
+      parsed.formData.fcoDraft.technicalContent.declaredParts = declaredParts.map((p: any) =>
+        p?.id ? p : { ...p, id: crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).substring(2, 15) }
+      );
+    }
     return { formData: parsed.formData, currentStep: step };
   } catch {
     return null; // corrupt / old schema / unavailable -> fresh start

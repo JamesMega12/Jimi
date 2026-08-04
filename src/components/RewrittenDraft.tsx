@@ -1,6 +1,7 @@
 import React from 'react';
-import { FileText, AlertTriangle, Info, ShieldAlert, CheckSquare } from 'lucide-react';
-import { FCOSummary, FCOProcedure } from '../types';
+import { FileText, AlertTriangle, Info, ShieldAlert, CheckSquare, Square } from 'lucide-react';
+import { FCOSummary, FCOProcedure, ProcedureCheck } from '../types';
+import { computeProcedureBands } from '../utils/procedureBands';
 
 function parseSummaryString(summaryStr: string): FCOSummary {
   const probRegex = /(?:Problem):\s*(.*?)(?=Cause:|Solution:|Benefit:|$)/i;
@@ -86,9 +87,31 @@ interface RewrittenDraftProps {
   procedure: FCOProcedure;
   apiResponse?: any;
   procedureCallouts?: any[];
+  checks?: ProcedureCheck[];
 }
 
-export default function RewrittenDraft({ summary, procedure, apiResponse, procedureCallouts = [] }: RewrittenDraftProps) {
+// A check renders visually distinct from an ordinary step — checkbox glyph +
+// category caption — matching the DOCX export's checkRow() treatment exactly,
+// so what's previewed here matches what's exported. A plain function
+// returning a keyed element (not a JSX-invoked component) — this project has
+// no @types/react installed, so custom components lose the special `key`
+// prop allowance intrinsic elements get; baking the key into the returned
+// element itself sidesteps that.
+function checkBadge(check: ProcedureCheck) {
+  return (
+    <div key={check.id} className="flex items-start gap-2.5 p-2.5 bg-amber-50/60 border border-amber-200 rounded-lg">
+      <Square className="w-4 h-4 text-amber-500 flex-shrink-0 mt-0.5" strokeWidth={2.5} />
+      <div className="flex-1 min-w-0">
+        <span className="block text-[10px] font-bold uppercase tracking-wide text-amber-700 mb-0.5">
+          {check.category.replace(/_/g, ' ')}
+        </span>
+        <span className="text-sm text-slate-700 leading-relaxed">{check.text}</span>
+      </div>
+    </div>
+  );
+}
+
+export default function RewrittenDraft({ summary, procedure, apiResponse, procedureCallouts = [], checks = [] }: RewrittenDraftProps) {
   const normalizedSummary = summary ? normalizeSummary(summary) : null;
   const pcsbToUse = apiResponse?.confirmedPCSB || apiResponse?.summaryAnalysis?.pcsb || normalizedSummary?.components || ({} as any);
 
@@ -168,121 +191,136 @@ export default function RewrittenDraft({ summary, procedure, apiResponse, proced
             </div>
           )}
 
-          {procedure.sections.map((section, sectionIdx) => (
-            <div key={sectionIdx} className="border border-slate-200 rounded-xl p-4 bg-slate-50/20 text-sm space-y-3">
-              <h4 className="text-sm font-bold text-slate-900 border-b border-slate-150 pb-1.5 flex items-center justify-between font-sans">
-                <span>{section.title}</span>
-                <span className="text-xxs font-mono font-normal text-slate-400 uppercase">Section restarts at step 1</span>
-              </h4>
+          {/* Bands + check placement mirror the DOCX export exactly (see
+              procedureBands.ts) — what's previewed here is what gets
+              exported, band-for-band, position-for-position. Step numbering
+              runs continuously across all three bands, matching masterStepNum
+              in docxExportService.ts, not restarting per band. */}
+          {(() => {
+            const bands = computeProcedureBands(procedure, checks);
+            let stepNum = 0;
+            return bands.map(band => {
+              const anchoredCount = band.stepRows.reduce((n, r) =>
+                n + (r.stepGroupId ? (band.checksByStepGroupId.get(r.stepGroupId)?.before.length || 0) + (band.checksByStepGroupId.get(r.stepGroupId)?.after.length || 0) : 0), 0);
+              if (band.stepRows.length === 0 && anchoredCount === 0 && band.fallbackBeforeChecks.length === 0 && band.fallbackAfterChecks.length === 0 && band.preambleChecks.length === 0) {
+                return null;
+              }
 
-              {/* User Callouts (Warnings, Cautions, Notes) */}
-              {(() => {
-                const sectionCallouts = procedureCallouts.filter(c => 
-                  c.section.toLowerCase() === section.title.toLowerCase() || 
-                  section.title.toLowerCase().includes(c.section.toLowerCase())
-                );
-                if (sectionCallouts.length === 0) return null;
-                
-                return (
-                  <div className="space-y-2">
-                    {sectionCallouts.map((callout) => {
-                      if (!callout.text || !callout.text.trim()) return null;
-                      if (callout.type === 'warning') {
-                        return (
-                          <div key={callout.id} className="bg-red-50 border-l-4 border-red-650 p-2.5 rounded-r-lg flex items-start gap-2 text-red-900 font-sans text-xs">
-                            <ShieldAlert className="w-4 h-4 text-red-650 flex-shrink-0 mt-0.5 animate-pulse" />
-                            <div>
-                              <strong className="font-bold font-mono uppercase tracking-wide mr-1 text-red-700">WARNING:</strong>
-                              {cleanLabel(callout.text)}
-                            </div>
-                          </div>
-                        );
-                      }
-                      if (callout.type === 'caution') {
-                        return (
-                          <div key={callout.id} className="bg-amber-50 border-l-4 border-amber-500 p-2.5 rounded-r-lg flex items-start gap-2 text-amber-900 font-sans text-xs">
-                            <AlertTriangle className="w-4 h-4 text-amber-600 flex-shrink-0 mt-0.5" />
-                            <div>
-                              <strong className="font-bold font-mono uppercase tracking-wide mr-1 text-amber-700">CAUTION:</strong>
-                              {cleanLabel(callout.text)}
-                            </div>
-                          </div>
-                        );
-                      }
-                      if (callout.type === 'note') {
-                        return (
-                          <div key={callout.id} className="bg-blue-50/50 border-l-4 border-blue-550 p-2.5 rounded-r-lg flex items-start gap-2 text-blue-900 font-sans text-xs">
-                            <Info className="w-4 h-4 text-blue-550 flex-shrink-0 mt-0.5" />
-                            <div>
-                              <strong className="font-bold font-mono uppercase tracking-wide mr-1 text-blue-800">Note:</strong>
-                              {cleanLabel(callout.text)}
-                            </div>
-                          </div>
-                        );
-                      }
-                      return null;
-                    })}
-                  </div>
-                );
-              })()}
+              const bandCallouts = procedureCallouts.filter(c =>
+                c.section && (c.section.toLowerCase() === band.title.toLowerCase() || band.title.toLowerCase().includes(c.section.toLowerCase()))
+              );
 
-              {/* Part-localized step groups (official FCO layout blocks) */}
-              {section.stepGroups && section.stepGroups.length > 0 && (
-                <div className="space-y-3">
-                  {section.stepGroups.map((group, groupIdx) => (
-                    <div key={groupIdx} className="bg-white border border-slate-200 rounded-lg overflow-hidden">
-                      <div className="flex items-center gap-2.5 px-3 py-2 bg-slate-50 border-b border-slate-200">
-                        <span className="w-5 h-5 flex items-center justify-center bg-indigo-100 rounded-full text-xs font-bold text-indigo-700 font-mono flex-shrink-0">
-                          {groupIdx + 1}
-                        </span>
-                        <span className="text-sm font-bold text-slate-800">{group.title}</span>
-                        {group.forPart && (
-                          <span className="ml-auto text-[10px] uppercase font-bold text-indigo-600 bg-indigo-50 border border-indigo-100 px-1.5 py-0.5 rounded">
-                            {group.forPart}
-                          </span>
-                        )}
-                      </div>
-                      <ul className="divide-y divide-slate-100">
-                        {group.steps.map((step, stepIdx) => (
-                          <li key={stepIdx} className="flex gap-3 p-2.5 pl-5 text-slate-700 text-sm">
-                            <span className="text-slate-400 flex-shrink-0">•</span>
-                            <span className="leading-relaxed font-sans">{step}</span>
-                          </li>
-                        ))}
-                      </ul>
+              return (
+                <div key={band.key} className="border border-slate-200 rounded-xl p-4 bg-slate-50/20 text-sm space-y-3">
+                  <h4 className="text-sm font-bold text-slate-900 border-b border-slate-150 pb-1.5 font-sans">
+                    {band.title}
+                  </h4>
+
+                  {band.preambleChecks.map(c => checkBadge(c))}
+
+                  {bandCallouts.length > 0 && (
+                    <div className="space-y-2">
+                      {bandCallouts.map((callout) => {
+                        if (!callout.text || !callout.text.trim()) return null;
+                        if (callout.type === 'warning') {
+                          return (
+                            <div key={callout.id} className="bg-red-50 border-l-4 border-red-650 p-2.5 rounded-r-lg flex items-start gap-2 text-red-900 font-sans text-xs">
+                              <ShieldAlert className="w-4 h-4 text-red-650 flex-shrink-0 mt-0.5 animate-pulse" />
+                              <div>
+                                <strong className="font-bold font-mono uppercase tracking-wide mr-1 text-red-700">WARNING:</strong>
+                                {cleanLabel(callout.text)}
+                              </div>
+                            </div>
+                          );
+                        }
+                        if (callout.type === 'caution') {
+                          return (
+                            <div key={callout.id} className="bg-amber-50 border-l-4 border-amber-500 p-2.5 rounded-r-lg flex items-start gap-2 text-amber-900 font-sans text-xs">
+                              <AlertTriangle className="w-4 h-4 text-amber-600 flex-shrink-0 mt-0.5" />
+                              <div>
+                                <strong className="font-bold font-mono uppercase tracking-wide mr-1 text-amber-700">CAUTION:</strong>
+                                {cleanLabel(callout.text)}
+                              </div>
+                            </div>
+                          );
+                        }
+                        if (callout.type === 'note') {
+                          return (
+                            <div key={callout.id} className="bg-blue-50/50 border-l-4 border-blue-550 p-2.5 rounded-r-lg flex items-start gap-2 text-blue-900 font-sans text-xs">
+                              <Info className="w-4 h-4 text-blue-550 flex-shrink-0 mt-0.5" />
+                              <div>
+                                <strong className="font-bold font-mono uppercase tracking-wide mr-1 text-blue-800">Note:</strong>
+                                {cleanLabel(callout.text)}
+                              </div>
+                            </div>
+                          );
+                        }
+                        return null;
+                      })}
                     </div>
-                  ))}
-                </div>
-              )}
+                  )}
 
-              {/* Numbered Steps */}
-              {section.steps && section.steps.length > 0 ? (
-                <ol className="divide-y divide-slate-100 bg-white border border-slate-200 rounded-lg overflow-hidden">
-                  {section.steps.map((step, stepIdx) => (
-                    <li key={stepIdx} className="flex gap-3.5 p-3 text-slate-700 hover:bg-slate-50/50 transition-colors">
-                      <span className="w-5 h-5 flex items-center justify-center bg-slate-100 rounded-full text-xs font-bold text-slate-600 font-mono flex-shrink-0">
-                        {(section.stepGroups?.length || 0) + stepIdx + 1}
-                      </span>
-                      <span className="leading-relaxed font-sans">
-                        {step.split(/(\[Insert.*?\])/).map((part, i) => {
-                          if (part.startsWith('[Insert')) {
-                            return (
-                               <span key={i} className="inline-block mt-2 mb-2 w-full p-2 border-2 border-indigo-200 bg-indigo-50 text-indigo-800 rounded font-bold font-mono text-xs">
-                                 {part}
-                               </span>
-                            );
-                          }
-                          return part;
-                        })}
-                      </span>
-                    </li>
-                  ))}
-                </ol>
-              ) : (!section.stepGroups || section.stepGroups.length === 0) ? (
-                <p className="text-xs text-slate-400 italic">No specific action steps provided for this section.</p>
-              ) : null}
-            </div>
-          ))}
+                  {band.fallbackBeforeChecks.map(c => checkBadge(c))}
+
+                  {band.stepRows.length > 0 ? (
+                    <div className="space-y-2">
+                      {band.stepRows.map((row, rowIdx) => {
+                        const anchored = row.stepGroupId ? band.checksByStepGroupId.get(row.stepGroupId) : undefined;
+                        stepNum++;
+                        const n = stepNum;
+                        return (
+                          <React.Fragment key={rowIdx}>
+                            {(anchored?.before || []).map(c => checkBadge(c))}
+                            {row.title ? (
+                              <div className="bg-white border border-slate-200 rounded-lg overflow-hidden">
+                                <div className="flex items-center gap-2.5 px-3 py-2 bg-slate-50 border-b border-slate-200">
+                                  <span className="w-5 h-5 flex items-center justify-center bg-indigo-100 rounded-full text-xs font-bold text-indigo-700 font-mono flex-shrink-0">
+                                    {n}
+                                  </span>
+                                  <span className="text-sm font-bold text-slate-800">{row.title}</span>
+                                </div>
+                                <ul className="divide-y divide-slate-100">
+                                  {row.texts.map((step, stepIdx) => (
+                                    <li key={stepIdx} className="flex gap-3 p-2.5 pl-5 text-slate-700 text-sm">
+                                      <span className="text-slate-400 flex-shrink-0 font-mono text-xs mt-0.5">{stepIdx + 1}.</span>
+                                      <span className="leading-relaxed font-sans">{step}</span>
+                                    </li>
+                                  ))}
+                                </ul>
+                              </div>
+                            ) : (
+                              <div className="flex gap-3.5 p-3 text-slate-700 bg-white border border-slate-200 rounded-lg">
+                                <span className="w-5 h-5 flex items-center justify-center bg-slate-100 rounded-full text-xs font-bold text-slate-600 font-mono flex-shrink-0">
+                                  {n}
+                                </span>
+                                <span className="leading-relaxed font-sans">
+                                  {row.texts[0].split(/(\[Insert.*?\])/).map((part, i) => {
+                                    if (part.startsWith('[Insert')) {
+                                      return (
+                                        <span key={i} className="inline-block mt-2 mb-2 w-full p-2 border-2 border-indigo-200 bg-indigo-50 text-indigo-800 rounded font-bold font-mono text-xs">
+                                          {part}
+                                        </span>
+                                      );
+                                    }
+                                    return part;
+                                  })}
+                                </span>
+                              </div>
+                            )}
+                            {(anchored?.after || []).map(c => checkBadge(c))}
+                          </React.Fragment>
+                        );
+                      })}
+                    </div>
+                  ) : (
+                    <p className="text-xs text-slate-400 italic">No specific action steps provided for this section.</p>
+                  )}
+
+                  {band.fallbackAfterChecks.map(c => checkBadge(c))}
+                </div>
+              );
+            });
+          })()}
         </div>
       </div>
     </div>

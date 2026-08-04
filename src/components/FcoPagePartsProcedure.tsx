@@ -4,7 +4,7 @@ import { ChevronRight, ChevronLeft, CheckCircle2, Sparkles, Loader2, AlertCircle
 import ProcedureReadinessPanel from './ProcedureReadinessPanel';
 import EditableProcedureView from './EditableProcedureView';
 import RewrittenDraft from './RewrittenDraft';
-import { buildDisplayProcedure } from '../utils/procedureMerge';
+import ProcedureChecksEditor from './ProcedureChecksEditor';
 import { FcoDraftingState } from '../hooks/useFcoDraftingState';
 
 interface FcoPagePartsProcedureProps {
@@ -211,6 +211,8 @@ export default function FcoPagePartsProcedure({ formData, developerMode, onBack,
                        suggestions={readinessSuggestions}
                        onUpdateSuggestions={setReadinessSuggestions}
                        developerMode={developerMode}
+                       generatedProcedure={generatedProcedure}
+                       declaredParts={declaredParts}
                      />
                    )}
 
@@ -232,7 +234,7 @@ export default function FcoPagePartsProcedure({ formData, developerMode, onBack,
                      </button>
                      {readinessSuggestions.some(s => s.status === 'accepted' || s.status === 'edited') && (
                        <span className="text-xs text-emerald-700 font-semibold">
-                         Accepted readiness steps will be added to the procedure.
+                         Accepted readiness suggestions will be added as checks.
                        </span>
                      )}
                    </div>
@@ -255,10 +257,17 @@ export default function FcoPagePartsProcedure({ formData, developerMode, onBack,
                    <div className="bg-white p-4 border border-emerald-100 rounded-lg opacity-80 pointer-events-none">
                      <RewrittenDraft
                        summary={undefined}
-                       procedure={buildDisplayProcedure(formData.fcoDraft.technicalContent.acceptedProcedure, [])}
+                       procedure={formData.fcoDraft.technicalContent.acceptedProcedure}
                        procedureCallouts={[]}
+                       checks={formData.fcoDraft.technicalContent.checks || []}
                      />
                    </div>
+                   <ProcedureChecksEditor
+                     checks={formData.fcoDraft.technicalContent.checks || []}
+                     onUpdateChecks={(next) => handleDraftChange('technicalContent', 'checks', next)}
+                     declaredParts={declaredParts}
+                     procedure={formData.fcoDraft.technicalContent.acceptedProcedure}
+                   />
                 </div>
              )}
           </div>

@@ -17,7 +17,9 @@ You will evaluate the procedure against these categories:
 4. "post_installation_check" - Missing immediate physical checks after installation (e.g. torque, seal, visual inspection).
 5. "functional_check" - Missing system-level functional test, leak test, or operation check.
 6. "completion_verification" - Missing final sign-off, restoration of service, or cleanup.
-7. "documentation_impact" - Missing instructions to update manuals, drawings, or software records.
+
+Do not suggest documentation/manual/drawing/software-record update items — those
+belong in the FCO's existing Maintenance Procedure Changes field, not here.
 
 RULES:
 - Suggest ONLY missing elements. If a category is already covered by an existing step, do NOT suggest it.
@@ -27,12 +29,28 @@ RULES:
 - Return a JSON array of suggestions.
 - Do not output markdown code blocks outside of the JSON payload. Ensure valid JSON.
 
+For each suggestion, also propose what it applies to — this is a proposal only,
+a human reviews and can change it before anything is accepted:
+- "suggestedPartNames": exact name(s) from "Parts Involved" below that this
+  applies to. Empty array if it applies to the whole procedure, not one part.
+- "suggestedStepGroupTitle": the exact title of the step block in "Current
+  Procedure" below that this most relates to. Leave empty if it doesn't
+  relate to one specific step block (e.g. a whole-procedure prerequisite).
+- "suggestedAnchorPosition": "before" if this should happen before that step
+  block, "after" if it should happen after it. Only meaningful when
+  suggestedStepGroupTitle is set.
+Only use part names and step block titles that appear EXACTLY as given below.
+Never invent a name or title that isn't listed.
+
 Schema per suggestion:
 {
-  "category": "pre_installation" | "safety_preparation" | "parts_check" | "post_installation_check" | "functional_check" | "completion_verification" | "documentation_impact",
+  "category": "pre_installation" | "safety_preparation" | "parts_check" | "post_installation_check" | "functional_check" | "completion_verification",
   "targetSection": "Safety and Preparation" | "Installation Steps" | "Post-Installation / Functional Check",
   "suggestedText": "string",
-  "reason": "string"
+  "reason": "string",
+  "suggestedPartNames": ["string"],
+  "suggestedStepGroupTitle": "string",
+  "suggestedAnchorPosition": "before" | "after"
 }
 `;
 
@@ -44,17 +62,23 @@ export async function generateReadinessSuggestions(
     const procedureText = rewrittenProcedure.sections
       .map(s => {
         const groupText = (s.stepGroups || [])
-          .map(g => `${g.title}:\n${g.steps.map(st => `- ${st}`).join('\n')}`)
+          .map(g => `${g.title}${g.forPart ? ` (part: ${g.forPart})` : ''}:\n${g.steps.map(st => `- ${st}`).join('\n')}`)
           .join('\n');
         const flatText = (s.steps || []).map((step, i) => `${i + 1}. ${step}`).join('\n');
         return `[${s.title}]\n${[groupText, flatText].filter(Boolean).join('\n')}`;
       })
       .join('\n\n');
 
+    const partsList = (rewrittenProcedure.partsInvolved || [])
+      .map(p => p?.name)
+      .filter(Boolean)
+      .join(', ') || 'None declared';
+
     const inputContext = `
 FCO Title: ${fcoDraft.fcoMetadata?.fcoTitle || ''}
 Change Type: ${rewrittenProcedure.changeType || ''}
 Known Safety Risks: ${fcoDraft.technicalContent?.knownSafetyRisks || ''}
+Parts Involved: ${partsList}
 
 Current Procedure:
 ${procedureText}
@@ -76,7 +100,10 @@ ${procedureText}
               category: { type: Type.STRING },
               targetSection: { type: Type.STRING },
               suggestedText: { type: Type.STRING },
-              reason: { type: Type.STRING }
+              reason: { type: Type.STRING },
+              suggestedPartNames: { type: Type.ARRAY, items: { type: Type.STRING } },
+              suggestedStepGroupTitle: { type: Type.STRING },
+              suggestedAnchorPosition: { type: Type.STRING }
             },
             required: ["category", "targetSection", "suggestedText", "reason"]
           }
@@ -100,7 +127,7 @@ ${procedureText}
         continue;
       }
       
-      const validCategories = ["pre_installation", "safety_preparation", "parts_check", "post_installation_check", "functional_check", "completion_verification", "documentation_impact"];
+      const validCategories = ["pre_installation", "safety_preparation", "parts_check", "post_installation_check", "functional_check", "completion_verification"];
       if (!validCategories.includes(item.category)) continue;
 
       const validTargetSections = ["Safety and Preparation", "Installation Steps", "Post-Installation / Functional Check", "Safety", "Preparation", "Implementation", "Verification", "Completion"];
@@ -115,6 +142,21 @@ ${procedureText}
         else if (targetSec.toLowerCase().includes('complet')) targetSec = "Completion";
       }
 
+      // Pass through the AI's proposed target as-is (never invent it here) —
+      // it's shown as an editable/overridable suggestion in
+      // ProcedureReadinessPanel and only resolved to real ids at accept time.
+      const suggestedPartNames = Array.isArray(item.suggestedPartNames)
+        ? item.suggestedPartNames.filter((n: any) => typeof n === 'string' && n.trim())
+        : undefined;
+      const suggestedStepGroupTitle =
+        typeof item.suggestedStepGroupTitle === 'string' && item.suggestedStepGroupTitle.trim()
+          ? item.suggestedStepGroupTitle.trim()
+          : undefined;
+      const suggestedAnchorPosition =
+        item.suggestedAnchorPosition === 'before' || item.suggestedAnchorPosition === 'after'
+          ? item.suggestedAnchorPosition
+          : undefined;
+
       suggestions.push({
         id: crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).substring(2, 15),
         category: item.category,
@@ -124,7 +166,10 @@ ${procedureText}
         status: "pending",
         source: "ai_suggestion",
         requiresUserConfirmation: true,
-        createdAt: new Date().toISOString()
+        createdAt: new Date().toISOString(),
+        ...(suggestedPartNames && suggestedPartNames.length > 0 ? { suggestedPartNames } : {}),
+        ...(suggestedStepGroupTitle ? { suggestedStepGroupTitle } : {}),
+        ...(suggestedAnchorPosition ? { suggestedAnchorPosition } : {})
       });
     }
 

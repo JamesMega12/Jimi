@@ -11,7 +11,6 @@ import { buildEvaluateSummaryPrompt } from './src/server/evaluateSummaryPrompt';
 import { runLocalHeuristic } from './src/server/fallbackEngine';
 import { validateAndRepairResponse, validateDraft } from './src/server/validationService';
 import { generateReadinessSuggestions } from './src/server/readinessService';
-import { buildDisplayProcedure } from './src/utils/procedureMerge';
 import { cleanSummaryForPrompt } from './src/server/summaryPlanBuilder';
 import { FCOApiResponse, FCORequestData, DocxAnalysisResponse } from './src/types';
 import { getDocuments, deleteDocument, getChunks, getSettings, updateSettings, loadSeedData, clearSeedData, saveChunks, saveDocument, replaceDocumentChunks } from './src/server/knowledgeBaseService';
