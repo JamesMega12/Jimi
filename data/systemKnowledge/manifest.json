@@ -7,8 +7,18 @@
       "version": "synthetic-1.0.0",
       "file": "synthetic-ste-fixture-v1.md",
       "docType": "STE Handbook",
-      "enabled": true,
+      "$comment": "Disabled for live retrieval now that the real handbook is ingested — its synthetic canary rule (approx-QX7) must never leak into production output. The source file is retained because the offline system-knowledge tests read it via loadSyntheticFixtureSource().",
+      "enabled": false,
       "synthetic": true
+    },
+    {
+      "id": "slb-comm-handbook",
+      "name": "SLB Communications Handbook",
+      "version": "2024-12",
+      "file": "slb-comm-handbook-2024-12.pdf",
+      "docType": "STE Handbook",
+      "enabled": true,
+      "synthetic": false
     }
   ]
 }
