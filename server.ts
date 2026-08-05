@@ -26,6 +26,8 @@ import { technicalAlertRoutesV2 } from './src/server/routes/technicalAlertRoutes
 import { announcementRoutes } from './src/server/routes/announcementRoutes';
 import { logEvent, newRequestId } from './src/server/logger';
 import { kbRoutes } from './src/server/routes/kbRoutes';
+import { systemKnowledgeRoutes } from './src/server/routes/systemKnowledgeRoutes';
+import { syncSystemKnowledge } from './src/server/systemKnowledge/systemKnowledgeService';
 import { chunkExtractedText, checkCorruption } from './src/server/chunkingService';
 import { generateTextEmbedding } from './src/server/embeddingService';
 import { generateDocxExport } from './src/server/docxExportService';
@@ -131,6 +133,7 @@ app.use('/api/technical-alert/v2', technicalAlertRoutesV2);
 // Dedicated Announcement routes (Summary/Reason/Action + review/export).
 app.use('/api/announcement', announcementRoutes);
 app.use('/api/kb', kbRoutes);
+app.use('/api/knowledge/system', systemKnowledgeRoutes);
 
 /**
  * Safe JSON parser with backslash/markdown cleanup
@@ -333,39 +336,60 @@ async function processRewrite(req: express.Request, res: express.Response) {
     safetyRefused = true;
   }
 
-  // Retrieve relevant chunks from the Knowledge Base for RAG grounding
+  // Retrieve relevant chunks from the Knowledge Base for RAG grounding.
+  // retrieveRelevantChunks() already catches its own errors internally and
+  // reports them via `provenance.status === 'error'` rather than throwing --
+  // this try/catch is a last-resort safety net, not the primary error path,
+  // and it must not collapse a real error into the same "nothing found"
+  // shape as an empty result (that used to happen here via a bare
+  // console.warn with no trace back to this request).
+  const requestId = (req as any).requestId;
   let retrievedChunks: any[] = [];
   let matchedCategories: string[] = [];
   let topChunkCategories: string[] = [];
+  let retrievalProvenance: any = { status: 'error', systemSources: [], searchedChunkCount: 0, embeddingBackend: 'unknown', backendMismatchCount: 0 };
   try {
     const retrievalResult = await retrieveRelevantChunks(req.body, 5);
     retrievedChunks = retrievalResult.sources;
     matchedCategories = retrievalResult.matchedCategories;
     topChunkCategories = retrievalResult.topChunkCategories;
-  } catch (retrieveErr) {
-    console.warn("Failed to retrieve chunks for RAG grounding:", retrieveErr);
+    retrievalProvenance = retrievalResult.provenance;
+  } catch (retrieveErr: any) {
+    const message = retrieveErr?.message || String(retrieveErr);
+    logEvent('error', 'knowledge_retrieval', { requestId, status: 'error', message, unexpected: true });
+    retrievalProvenance = { status: 'error', systemSources: [], searchedChunkCount: 0, embeddingBackend: 'unknown', backendMismatchCount: 0, error: message };
   }
 
   const allChunks = getChunks();
   const allDocs = getDocuments();
-  const uploadedDocumentChunkCount = allChunks.filter(c => !c.isSeedData).length;
+  const uploadedDocumentChunkCount = allChunks.filter(c => !c.isSeedData && c.sourceType !== 'system_knowledge').length;
   const seedChunkCount = allChunks.filter(c => c.isSeedData).length;
-  
-  const usedSeedData = retrievedChunks.some(c => c.isSeedData);
-  const usedUploadedSourceTruth = retrievedChunks.some(c => !c.isSeedData);
-  
-  let retrievalDataSource: 'seed_data' | 'uploaded_documents' | 'mixed' | 'none' = 'none';
+
+  const usedSystemKnowledge = retrievedChunks.some((c: any) => c.isSystemKnowledge);
+  const usedSeedData = retrievedChunks.some((c: any) => c.isSeedData && !c.isSystemKnowledge);
+  const usedUploadedSourceTruth = retrievedChunks.some((c: any) => !c.isSeedData && !c.isSystemKnowledge);
+
+  let retrievalDataSource: 'system_knowledge' | 'seed_data' | 'uploaded_documents' | 'mixed' | 'none' = 'none';
   if (retrievedChunks.length > 0) {
-     if (usedSeedData && usedUploadedSourceTruth) retrievalDataSource = 'mixed';
+     const tierCount = [usedSystemKnowledge, usedSeedData, usedUploadedSourceTruth].filter(Boolean).length;
+     if (tierCount > 1) retrievalDataSource = 'mixed';
+     else if (usedSystemKnowledge) retrievalDataSource = 'system_knowledge';
      else if (usedUploadedSourceTruth) retrievalDataSource = 'uploaded_documents';
      else if (usedSeedData) retrievalDataSource = 'seed_data';
   }
 
   const retrievalWarnings = [];
-  if (retrievedChunks.length === 0) {
-     retrievalWarnings.push("No uploaded source truths were active. Rewrite used embedded app rules only.");
-  } else if (!usedUploadedSourceTruth) {
+  if (retrievalProvenance.status === 'error') {
+     retrievalWarnings.push(`Retrieval failed: ${retrievalProvenance.error || 'unknown error'}. Rewrite proceeded without grounding.`);
+  } else if (retrievalProvenance.status === 'disabled') {
+     retrievalWarnings.push("System knowledge retrieval is disabled for this request. Rewrite used embedded app rules only.");
+  } else if (retrievedChunks.length === 0) {
+     retrievalWarnings.push("No relevant guidance was found. Rewrite used embedded app rules only.");
+  } else if (!usedSystemKnowledge && !usedUploadedSourceTruth) {
      retrievalWarnings.push("Rewrite used seeded demo guidance only. Upload approved source-truth documents for real grounding.");
+  }
+  if (retrievalProvenance.backendMismatchCount > 0) {
+     retrievalWarnings.push(`${retrievalProvenance.backendMismatchCount} indexed chunk(s) were embedded with a different backend than the current one and were scored as non-matches. Reindex to fix.`);
   }
 
   const groundingPromptContext = buildGroundingPromptContext(retrievedChunks);
@@ -376,15 +400,18 @@ async function processRewrite(req: express.Request, res: express.Response) {
 
   let knowledgeState: any = 'none';
   if (retrievedChunks.length > 0) {
-     if (usedUploadedSourceTruth && !usedSeedData) knowledgeState = 'uploaded_active';
-     else if (usedSeedData && !usedUploadedSourceTruth) knowledgeState = 'seed_only';
-     else if (usedUploadedSourceTruth && usedSeedData) knowledgeState = 'mixed';
+     if (usedSystemKnowledge && !usedSeedData && !usedUploadedSourceTruth) knowledgeState = 'system_knowledge_active';
+     else if (usedUploadedSourceTruth && !usedSeedData) knowledgeState = 'uploaded_active';
+     else if (usedSeedData && !usedUploadedSourceTruth && !usedSystemKnowledge) knowledgeState = 'seed_only';
+     else knowledgeState = 'mixed';
   }
 
   const groundingDiagnostics = {
     groundingUsed: retrievedChunks.length > 0,
     retrievedChunkCount: retrievedChunks.length,
     retrievalDataSource,
+    retrievalStatus: retrievalProvenance.status,
+    usedSystemKnowledge,
     usedUploadedSourceTruth,
     usedSeedData,
     sourceTruthContextInjected: groundingPromptContext.trim().length > 0,
@@ -394,6 +421,14 @@ async function processRewrite(req: express.Request, res: express.Response) {
     seedChunkCount,
     matchedCategories,
     topChunkCategories,
+    systemKnowledge: {
+      status: retrievalProvenance.status,
+      sources: retrievalProvenance.systemSources,
+      searchedChunkCount: retrievalProvenance.searchedChunkCount,
+      embeddingBackend: retrievalProvenance.embeddingBackend,
+      backendMismatchCount: retrievalProvenance.backendMismatchCount,
+      error: retrievalProvenance.error,
+    },
     retrievedSources: retrievedChunks.map((chunk: any) => ({
       documentName: chunk.documentName,
       documentType: chunk.documentType,
@@ -401,6 +436,7 @@ async function processRewrite(req: express.Request, res: express.Response) {
       chunkId: chunk.chunkId || chunk.id,
       relevanceScore: chunk.relevanceScore,
       isSeedData: chunk.isSeedData,
+      isSystemKnowledge: chunk.isSystemKnowledge,
       sectionTitle: chunk.sectionTitle
     })),
     retrievalWarnings
@@ -1404,6 +1440,29 @@ app.use((err: any, req: express.Request, res: express.Response, next: express.Ne
 
 const server = app.listen(PORT, '0.0.0.0', () => {
   console.log(`Server running on port ${PORT}`);
+
+  // Bootstrap the system-owned knowledge source(s) declared in
+  // data/systemKnowledge/manifest.json. Idempotent by content+config+backend
+  // fingerprint (see systemKnowledgeService.ts), so a routine restart
+  // re-syncs in milliseconds without re-embedding anything; only an actual
+  // source/config/backend change triggers real work. Runs after listen()
+  // rather than before so a slow or failing sync never delays the server
+  // coming up -- ingestion failures are recorded per-source and surfaced via
+  // GET /api/knowledge/system/status, not thrown here.
+  syncSystemKnowledge()
+    .then((results) => {
+      for (const r of results) {
+        logEvent(r.status === 'failed' ? 'error' : 'info', 'system_knowledge_bootstrap', {
+          sourceId: r.id,
+          status: r.status,
+          chunkCount: r.chunkCount,
+          errorMessage: r.errorMessage,
+        });
+      }
+    })
+    .catch((err: any) => {
+      logEvent('error', 'system_knowledge_bootstrap', { status: 'failed', message: err?.message || String(err) });
+    });
 });
 
 // Fail clearly (rather than an unhandled crash) if the port is taken.

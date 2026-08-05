@@ -1,0 +1,14 @@
+{
+  "$comment": "Declares system-owned knowledge sources for Jimi's AI-assisted writing features. Each entry's `id` becomes the stable KBDocument id across re-ingests. See docs/SYSTEM_KNOWLEDGE.md for how to replace the synthetic fixture with the approved handbook.",
+  "sources": [
+    {
+      "id": "system-ste-handbook",
+      "name": "Synthetic STE Test Guide",
+      "version": "synthetic-1.0.0",
+      "file": "synthetic-ste-fixture-v1.md",
+      "docType": "STE Handbook",
+      "enabled": true,
+      "synthetic": true
+    }
+  ]
+}
