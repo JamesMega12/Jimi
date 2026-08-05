@@ -1,5 +1,5 @@
-import React from 'react';
-import { PenTool, Sparkles, AlertTriangle, ShieldCheck, Database, ToggleLeft, ToggleRight } from 'lucide-react';
+import React, { useState } from 'react';
+import { PenTool, Sparkles, AlertTriangle, ShieldCheck, Database, ToggleLeft, ToggleRight, Trash2 } from 'lucide-react';
 import { FCODiagnostics } from '../types';
 
 const ENABLE_LEGACY_GROUNDING_KB_UI = false;
@@ -9,12 +9,14 @@ interface HeaderProps {
   loading?: boolean;
   onOpenKbAdmin?: () => void;
   onOpenDevKnowledge?: () => void;
+  onClearDraft: () => void;
   ragStatus?: 'checked' | 'seed_only' | 'ready';
   developerMode: boolean;
   setDeveloperMode: (mode: boolean) => void;
 }
 
-export default function Header({ diagnostics, loading, onOpenKbAdmin, onOpenDevKnowledge, ragStatus, developerMode, setDeveloperMode }: HeaderProps) {
+export default function Header({ diagnostics, loading, onOpenKbAdmin, onOpenDevKnowledge, onClearDraft, ragStatus, developerMode, setDeveloperMode }: HeaderProps) {
+  const [showClearConfirm, setShowClearConfirm] = useState(false);
   const getBadge = () => {
     if (loading) {
       return (
@@ -97,7 +99,34 @@ export default function Header({ diagnostics, loading, onOpenKbAdmin, onOpenDevK
               {developerMode ? <ToggleRight className="w-4 h-4 text-indigo-600" /> : <ToggleLeft className="w-4 h-4 text-slate-400" />}
               <span>{developerMode ? 'Developer Mode' : 'User Mode'}</span>
             </button>
-            
+
+            {showClearConfirm ? (
+              <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold border border-red-200 bg-red-50 mr-2">
+                <span className="text-red-700">Are you sure?</span>
+                <button
+                  onClick={() => { onClearDraft(); setShowClearConfirm(false); }}
+                  className="px-2 py-0.5 rounded-md bg-red-600 text-white hover:bg-red-700 transition-colors cursor-pointer"
+                >
+                  Yes
+                </button>
+                <button
+                  onClick={() => setShowClearConfirm(false)}
+                  className="px-2 py-0.5 rounded-md bg-white border border-slate-200 text-slate-600 hover:bg-slate-50 transition-colors cursor-pointer"
+                >
+                  Cancel
+                </button>
+              </div>
+            ) : (
+              <button
+                onClick={() => setShowClearConfirm(true)}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer border shadow-sm mr-2 bg-white border-slate-200 text-slate-600 hover:bg-red-50 hover:border-red-200 hover:text-red-700"
+                title="Clear the current draft and start over"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+                <span>Clear Draft</span>
+              </button>
+            )}
+
             {ENABLE_LEGACY_GROUNDING_KB_UI && developerMode && getRagBadge()}
             {developerMode && getBadge()}
             

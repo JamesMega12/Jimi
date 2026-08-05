@@ -593,11 +593,12 @@ export default function AppWorkflow() {
   return (
     <div className="min-h-screen bg-[#F8FAFC] flex flex-col font-sans text-slate-800" id="fco-main-root">
       {/* Header Bar */}
-      <Header 
-        diagnostics={response?.diagnostics} 
-        loading={loading} 
-        onOpenKbAdmin={() => setShowKbAdmin(true)} 
+      <Header
+        diagnostics={response?.diagnostics}
+        loading={loading}
+        onOpenKbAdmin={() => setShowKbAdmin(true)}
         onOpenDevKnowledge={() => setShowDevKnowledge(true)}
+        onClearDraft={handleStartNew}
         ragStatus={ragStatus}
         developerMode={developerMode}
         setDeveloperMode={setDeveloperMode}
