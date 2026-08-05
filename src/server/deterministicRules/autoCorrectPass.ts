@@ -85,12 +85,24 @@ export function applyDeterministicCorrections(finalized: any): DeterministicCorr
     return { corrected: finalized, corrections };
   }
 
-  // --- rewrittenSummary: paragraph + the four PCSB component strings ---
+  // --- rewrittenSummary: the paragraph, plus the four PCSB component strings.
+  //     Components live under rewrittenSummary.components.{problem,cause,
+  //     solution,benefit}; older/alternate shapes put them directly on
+  //     rewrittenSummary, so both are handled. ---
   const summary = finalized.rewrittenSummary;
   if (summary && typeof summary === 'object') {
-    for (const key of ['paragraph', 'problem', 'cause', 'solution', 'benefit']) {
-      if (typeof summary[key] === 'string') {
-        summary[key] = correctString(summary[key], `rewrittenSummary.${key}`, rules, corrections);
+    if (typeof summary.paragraph === 'string') {
+      summary.paragraph = correctString(summary.paragraph, 'rewrittenSummary.paragraph', rules, corrections);
+    }
+    for (const container of [
+      { obj: summary, prefix: 'rewrittenSummary' },
+      { obj: summary.components, prefix: 'rewrittenSummary.components' },
+    ]) {
+      if (!container.obj || typeof container.obj !== 'object') continue;
+      for (const key of ['problem', 'cause', 'solution', 'benefit']) {
+        if (typeof container.obj[key] === 'string') {
+          container.obj[key] = correctString(container.obj[key], `${container.prefix}.${key}`, rules, corrections);
+        }
       }
     }
   }

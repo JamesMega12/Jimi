@@ -1,11 +1,21 @@
 import { FcoDraft, FCORequestData } from '../types';
 
 /**
- * Fictional FCO sample preset used for testing the FCO Draft Assistant.
+ * Fictional FCO sample preset used for demoing the FCO Draft Assistant.
  *
  * The Summary and Procedure are intentionally rough, slightly wordy, and
  * repetitive so the AI Summary rewrite, Title generation, Procedure rewrite,
  * and Procedure readiness features have meaningful content to improve.
+ *
+ * They also deliberately contain a few SLB Communications Handbook style
+ * violations so a "Load Sample -> Rewrite" run visibly demonstrates the
+ * handbook grounding and the deterministic writing-convention layer:
+ *   - "Schlumberger" (the old company name) -> corrected to "SLB"
+ *     (handbook §1.1.7; deterministic rule abbr-slb-not-schlumberger)
+ *   - "degrees Celsius" / "degrees Fahrenheit" -> "degC" / "degF"
+ *     (handbook unit-symbol guidance; deterministic rules unit-degC/unit-degF)
+ * Open the developer "Grounding & Corrections" panel after a rewrite to see the
+ * retrieved handbook chunks and the applied corrections.
  *
  * acceptedSummary and acceptedProcedure are intentionally omitted (empty) so
  * the user starts by clicking "Generate AI Summary" first.
@@ -51,9 +61,9 @@ export const fcoSamplePreset: FcoDraft = {
   },
   technicalContent: {
     draftSummary:
-      'During recent field maintenance and post-job inspection of CPF-412 cementing pumper units, several locations reported that the current DM-500 discharge manifold clamp assembly shows accelerated wear on the clamp contact faces and in some cases the clamp requires repeated tightening checks after high-rate cementing jobs. The problem has not resulted in a confirmed pressure containment event, but it has increased maintenance time and created concern because the clamp is part of the discharge manifold connection that operators inspect frequently. The current clamp design uses the older contact profile and standard plated fasteners, and field feedback indicates that the contact face can wear unevenly when the manifold is assembled and disassembled repeatedly. The required change is to replace the current clamp assembly with the revised high-wear clamp kit, including the updated clamp halves, coated fasteners, and revised inspection washer. This update is expected to reduce clamp wear, improve inspection consistency, and reduce repeated rework during maintenance.',
+      'During recent field maintenance and post-job inspection of Schlumberger CPF-412 cementing pumper units, several locations reported that the current DM-500 discharge manifold clamp assembly shows accelerated wear on the clamp contact faces and in some cases the clamp requires repeated tightening checks after high-rate cementing jobs where the discharge manifold can reach temperatures of approximately 50 degrees Celsius. The problem has not resulted in a confirmed pressure containment event, but it has increased maintenance time and created concern because the clamp is part of the discharge manifold connection that operators inspect frequently. The current clamp design uses the older contact profile and standard plated fasteners, and field feedback indicates that the contact face can wear unevenly when the manifold is assembled and disassembled repeatedly. The required change is to replace the current clamp assembly with the revised Schlumberger high-wear clamp kit, including the updated clamp halves, coated fasteners, and revised inspection washer. The revised clamp kit is rated for continuous operation up to 150 degrees Celsius [302 degrees Fahrenheit]. This update is expected to reduce clamp wear, improve inspection consistency, and reduce repeated rework during maintenance.',
     draftProcedure:
-      'Do the following steps to replace the current DM-500 discharge manifold clamp assembly on CPF-412 cementing pumper units. Before starting, turn off the unit, isolate pressure, drain the discharge manifold, and follow the local Lockout/Tagout process. Confirm that there is no trapped pressure before loosening clamp fasteners. Remove the existing clamp assembly from the discharge manifold connection and inspect the manifold hub faces for scoring, dents, corrosion, or material transfer. If the hub face is damaged, stop the work and contact Engineering before installing the new clamp. Clean the hub faces and remove old debris. Install the revised clamp halves from high-wear clamp kit PN 109884210. Install coated fasteners PN 109884211 and inspection washers PN 109884212. Tighten the fasteners evenly in an alternating pattern. After assembly, mark the fastener position and perform a visual check after the first job. Record the clamp kit part number in the local maintenance record. If movement of the fastener marks is seen after operation, stop use and escalate before the next pumping job. [Figure 1: DM-500 discharge manifold clamp location] [Table 1: Old and new clamp components]',
+      'Do the following steps to replace the current DM-500 discharge manifold clamp assembly on Schlumberger CPF-412 cementing pumper units. Before starting, turn off the unit, isolate pressure, drain the discharge manifold, and follow the local Lockout/Tagout process. Confirm that there is no trapped pressure and that the manifold surface has cooled below 40 degrees Celsius before loosening clamp fasteners. Remove the existing clamp assembly from the discharge manifold connection and inspect the manifold hub faces for scoring, dents, corrosion, or material transfer. If the hub face is damaged, stop the work and contact Engineering before installing the new clamp. Clean the hub faces and remove old debris. Install the revised clamp halves from the Schlumberger high-wear clamp kit PN 109884210. Install coated fasteners PN 109884211 and inspection washers PN 109884212. Tighten the fasteners evenly in an alternating pattern. After assembly, mark the fastener position and perform a visual check after the first job. Record the clamp kit part number in the local maintenance record. If movement of the fastener marks is seen after operation, stop use and escalate before the next pumping job. [Figure 1: DM-500 discharge manifold clamp location] [Table 1: Old and new clamp components]',
     knownSafetyRisks: '',
     existingReferences: '',
     optionalRewriteInstructions: '',

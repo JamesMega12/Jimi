@@ -69,6 +69,23 @@ async function main() {
   applyDeterministicCorrections(draft4);
   assert(draft4.rewrittenSummary.paragraph === 'SLB personnel completed the job.', 'abbreviation: "Schlumberger" -> "SLB"');
 
+  // --- Case 4b: PCSB components live under rewrittenSummary.components ---
+  const draft4b: any = {
+    rewrittenSummary: {
+      paragraph: 'The SLB clamp fails at 50 degC.',
+      components: {
+        problem: 'Schlumberger clamp failure at 50 degrees Celsius',
+        cause: 'Overheating past 150 degrees Celsius',
+        solution: '[Information required from submitter]',
+        benefit: 'Fewer failures',
+      },
+    },
+  };
+  const r4b = applyDeterministicCorrections(draft4b);
+  assert(draft4b.rewrittenSummary.components.problem === 'SLB clamp failure at 50 degC', 'components.problem: Schlumberger->SLB and 50 degrees Celsius->50 degC');
+  assert(draft4b.rewrittenSummary.components.cause === 'Overheating past 150 degC', 'components.cause: 150 degrees Celsius->150 degC');
+  assert(r4b.corrections.some((c: any) => c.field === 'rewrittenSummary.components.problem'), 'a correction is attributed to rewrittenSummary.components.problem');
+
   // --- Case 5: clean input is a no-op ---
   const draft5: any = { rewrittenSummary: { paragraph: 'Install the new clamp at 50 degC and record completion.' } };
   const r5 = applyDeterministicCorrections(draft5);
