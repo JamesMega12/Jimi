@@ -593,11 +593,12 @@ export default function AppWorkflow() {
   return (
     <div className="min-h-screen bg-[#F8FAFC] flex flex-col font-sans text-slate-800" id="fco-main-root">
       {/* Header Bar */}
-      <Header 
-        diagnostics={response?.diagnostics} 
-        loading={loading} 
-        onOpenKbAdmin={() => setShowKbAdmin(true)} 
+      <Header
+        diagnostics={response?.diagnostics}
+        loading={loading}
+        onOpenKbAdmin={() => setShowKbAdmin(true)}
         onOpenDevKnowledge={() => setShowDevKnowledge(true)}
+        onClearDraft={handleStartNew}
         ragStatus={ragStatus}
         developerMode={developerMode}
         setDeveloperMode={setDeveloperMode}
@@ -692,9 +693,13 @@ export default function AppWorkflow() {
 
       {/* Developer Knowledge & Instructions Overlay */}
       {showDevKnowledge && developerMode && (
-        <DeveloperKnowledgePanel 
-          onClose={() => setShowDevKnowledge(false)} 
+        <DeveloperKnowledgePanel
+          onClose={() => setShowDevKnowledge(false)}
           latestTrace={response?.diagnostics?.instructionTrace}
+          latestGrounding={drafting.lastGrounding ?? response?.grounding}
+          latestCorrections={(drafting.lastDeterministicCorrections && drafting.lastDeterministicCorrections.length)
+            ? drafting.lastDeterministicCorrections
+            : response?.deterministicCorrections}
         />
       )}
     </div>

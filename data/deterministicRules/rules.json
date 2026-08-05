@@ -1,0 +1,57 @@
+{
+  "version": "slb-comm-handbook-2024-12.det-1",
+  "sourceRange": "SLB Communications Handbook 2024-12: temperature units pp.69/141/168; SLB name rule §1.1.7 p.4",
+  "reviewed": true,
+  "note": "Hand-curated and human-verified against the source PDF. Only high-confidence, unambiguous, notation-only substitutions belong here; the numeric value of any measurement is NEVER altered. spelling[] and closedLists[] are intentionally empty until the full glossary is extracted and reviewed in a later pass (see scripts/extractDeterministicRules.ts and docs). Patterns are applied globally to model-reworded text fields only.",
+  "unitSymbols": [
+    {
+      "ruleId": "unit-degC",
+      "ruleType": "unit",
+      "unitName": "degree Celsius",
+      "correctForm": "degC",
+      "comment": "Handbook: 'Do not use °C for degree Celsius.' Place the unit after the numeric value with a single space, e.g. '50 degC' (pp.69/141/168).",
+      "patterns": [
+        { "regex": "(\\d)\\s*°\\s*C\\b", "replacement": "$1 degC" },
+        { "regex": "(\\d)\\s*degrees?\\s+[Cc]elsius\\b", "replacement": "$1 degC" },
+        { "regex": "(\\d)\\s*degrees?\\s+C\\b", "replacement": "$1 degC" }
+      ]
+    },
+    {
+      "ruleId": "unit-degF",
+      "ruleType": "unit",
+      "unitName": "degree Fahrenheit",
+      "correctForm": "degF",
+      "comment": "Handbook: 'Do not use °F for degree Fahrenheit.' e.g. '228 degF' (pp.69/141/168).",
+      "patterns": [
+        { "regex": "(\\d)\\s*°\\s*F\\b", "replacement": "$1 degF" },
+        { "regex": "(\\d)\\s*degrees?\\s+[Ff]ahrenheit\\b", "replacement": "$1 degF" },
+        { "regex": "(\\d)\\s*degrees?\\s+F\\b", "replacement": "$1 degF" }
+      ]
+    },
+    {
+      "ruleId": "unit-degR",
+      "ruleType": "unit",
+      "unitName": "degree Rankine",
+      "correctForm": "degR",
+      "comment": "Handbook: 'Do not use °R for degree Rankine.' (pp.141/168).",
+      "patterns": [
+        { "regex": "(\\d)\\s*°\\s*R\\b", "replacement": "$1 degR" },
+        { "regex": "(\\d)\\s*degrees?\\s+[Rr]ankine\\b", "replacement": "$1 degR" }
+      ]
+    }
+  ],
+  "abbreviations": [
+    {
+      "ruleId": "abbr-slb-not-schlumberger",
+      "ruleType": "abbreviation",
+      "requiredForm": "SLB",
+      "disallowedExpansion": "Schlumberger",
+      "comment": "Handbook §1.1.7: 'Do not use “Schlumberger” as the spelled-out version of “SLB,” as “SLB” is not an initialism.' (p.4).",
+      "patterns": [
+        { "regex": "\\bSchlumberger\\b", "replacement": "SLB" }
+      ]
+    }
+  ],
+  "spelling": [],
+  "closedLists": []
+}

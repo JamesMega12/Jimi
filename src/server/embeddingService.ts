@@ -50,6 +50,24 @@ export function getEmbeddingBackendId(): EmbeddingBackend {
  * (e.g. marking one document ingestion as failed rather than crashing the
  * server) should catch this themselves.
  */
+/**
+ * Whether an error from the embedding API is transient (worth retrying):
+ * 503 UNAVAILABLE / 429 rate-limit / other 5xx. A 4xx other than 429 (e.g. a
+ * malformed request or an over-long input) is NOT retried. Ingesting a large
+ * document fires one call per chunk in sequence, which can trip transient
+ * overload/rate-limit responses that succeed on a short backoff.
+ */
+function isTransientEmbeddingError(err: any): boolean {
+  const msg = String(err?.message || err || '');
+  if (/50\d|unavailable|overloaded|deadline|timeout|ECONNRESET|ETIMEDOUT|429|rate limit|resource has been exhausted/i.test(msg)) {
+    return true;
+  }
+  const status = err?.status ?? err?.code;
+  return status === 503 || status === 429 || status === 500 || status === 502 || status === 504;
+}
+
+const EMBEDDING_MAX_ATTEMPTS = 5;
+
 export async function generateTextEmbedding(text: string): Promise<number[]> {
   if (!hasUsableApiKey()) {
     return generateLocalHeuristicEmbedding(text);
@@ -65,14 +83,32 @@ export async function generateTextEmbedding(text: string): Promise<number[]> {
     },
   });
 
-  const response: any = await ai.models.embedContent({
-    model: GEMINI_EMBEDDING_MODEL,
-    contents: text,
-  });
+  let lastErr: any;
+  for (let attempt = 1; attempt <= EMBEDDING_MAX_ATTEMPTS; attempt++) {
+    try {
+      const response: any = await ai.models.embedContent({
+        model: GEMINI_EMBEDDING_MODEL,
+        contents: text,
+      });
 
-  const values = response?.embeddings?.[0]?.values;
-  if (!values || !Array.isArray(values) || values.length === 0) {
-    throw new Error('Gemini embedding API returned an unexpected response shape (no embedding values).');
+      const values = response?.embeddings?.[0]?.values;
+      if (!values || !Array.isArray(values) || values.length === 0) {
+        throw new Error('Gemini embedding API returned an unexpected response shape (no embedding values).');
+      }
+      return values;
+    } catch (err: any) {
+      lastErr = err;
+      // Only retry transient failures; surface everything else immediately.
+      // Never fall back to a local vector here (see the doc comment above) --
+      // a dimension-mismatched substitute is worse than a clean failure.
+      if (attempt < EMBEDDING_MAX_ATTEMPTS && isTransientEmbeddingError(err)) {
+        // Exponential backoff with jitter: ~0.5s, 1s, 2s, 4s.
+        const delayMs = Math.round(500 * 2 ** (attempt - 1) * (0.75 + Math.random() * 0.5));
+        await new Promise((r) => setTimeout(r, delayMs));
+        continue;
+      }
+      throw err;
+    }
   }
-  return values;
+  throw lastErr;
 }

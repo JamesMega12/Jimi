@@ -3,6 +3,27 @@ export type FCODiagnostics = any;
 export type FCORequestData = any;
 export type ProcedureCallout = any;
 
+/**
+ * One deterministic writing-convention correction actually applied to the
+ * model's rewrite output by the post-generation auto-correct pass
+ * (src/server/deterministicRules/). Distinct from the model's own,
+ * LLM-generated `whatWasEdited` log: this is a machine-verifiable audit
+ * trail of notation/spelling normalizations enforced from the handbook's
+ * deterministic rule set, never touching the numeric value itself.
+ */
+export interface CorrectionRecord {
+  /** Dotted path of the corrected field, e.g. "rewrittenSummary.paragraph". */
+  field: string;
+  /** Text before the correction (the specific matched span's containing string). */
+  before: string;
+  /** Text after the correction. */
+  after: string;
+  /** Which rule class fired: 'unit' | 'abbreviation' | 'spelling'. */
+  ruleType: string;
+  /** Stable id of the specific rule, e.g. "unit-degC". */
+  ruleId: string;
+}
+
 export interface FCOPartInvolved {
   id: string;
   name: string;

@@ -41,6 +41,11 @@ export function useFcoDraftingState(
   // until Accept Procedure promotes it to acceptedProcedureDiagnostics.
   const [pendingProcedureDiagnostics, setPendingProcedureDiagnostics] = useState<FCODiagnostics | null>(null);
 
+  // Grounding provenance + deterministic corrections from the most recent
+  // rewrite (summary or procedure), surfaced in the developer Grounding panel.
+  const [lastGrounding, setLastGrounding] = useState<any>(null);
+  const [lastDeterministicCorrections, setLastDeterministicCorrections] = useState<any[]>([]);
+
   // Readiness suggestions for the freshly generated (not yet accepted) procedure.
   // Reviewed inline; accepted ones are baked into the procedure on accept.
   const [readinessSuggestions, setReadinessSuggestions] = useState<ProcedureReadinessSuggestion[]>([]);
@@ -270,6 +275,8 @@ export function useFcoDraftingState(
        if (data.rewrittenSummary) {
            setGeneratedSummary(data.rewrittenSummary);
            setPendingSummaryDiagnostics(data.diagnostics || null);
+           if (data.grounding) setLastGrounding(data.grounding);
+           setLastDeterministicCorrections(data.deterministicCorrections || []);
            setShowAnalysisModal(false);
            settle(summaryGuard.current, id);
        } else {
@@ -355,6 +362,8 @@ export function useFcoDraftingState(
        if (data.rewrittenProcedure) {
            setGeneratedProcedure(data.rewrittenProcedure);
            setPendingProcedureDiagnostics(data.diagnostics || null);
+           if (data.grounding) setLastGrounding(data.grounding);
+           setLastDeterministicCorrections(data.deterministicCorrections || []);
            settle(procedureGuard.current, id);
            // Run the readiness check on the generated draft so gaps are
            // reviewed BEFORE the user accepts the procedure. (Uses its own guard
@@ -410,6 +419,8 @@ export function useFcoDraftingState(
     setPendingSummaryDiagnostics(null);
     setGeneratedProcedure(null);
     setPendingProcedureDiagnostics(null);
+    setLastGrounding(null);
+    setLastDeterministicCorrections([]);
     setReadinessSuggestions([]);
     setReadinessChecked(false);
     setSummaryAnalysis(null);
@@ -438,6 +449,8 @@ export function useFcoDraftingState(
     procedureInputsChanged, pendingProcedureDiagnostics,
     // Parts
     declaredParts, addDeclaredPart, updateDeclaredPart, removeDeclaredPart,
+    // Grounding / deterministic corrections from the most recent rewrite
+    lastGrounding, lastDeterministicCorrections,
     // Shared
     handleDraftChange, resetPendingDraftingState
   };
