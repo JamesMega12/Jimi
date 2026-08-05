@@ -2,7 +2,12 @@ import fs from 'fs';
 import path from 'path';
 import { KBDocument, KBChunk } from '../types';
 
-const DATA_DIR = path.join(process.cwd(), 'src', 'server', 'data');
+// JIMI_KB_DATA_DIR lets tests (and, in principle, an alternate deployment
+// target) point the whole-file JSON store at a scratch directory instead of
+// the real committed one under src/server/data/.
+const DATA_DIR = process.env.JIMI_KB_DATA_DIR
+  ? path.resolve(process.env.JIMI_KB_DATA_DIR)
+  : path.join(process.cwd(), 'src', 'server', 'data');
 const DOCUMENTS_FILE = path.join(DATA_DIR, 'kb_documents.json');
 const CHUNKS_FILE = path.join(DATA_DIR, 'kb_chunks.json');
 
@@ -45,12 +50,36 @@ export function updateSettings(settings: Partial<KBSettings>): KBSettings {
   return updated;
 }
 
+/**
+ * Documents exactly as stored, with no field remapping. `getDocuments()`
+ * below rewrites `status` into a *different* enum for the legacy
+ * SourceTruthAdminPage UI ('indexed_clean' | 'indexed_warning' | 'failed' |
+ * 'processing', derived from chunk/corruption counts) -- fine for that UI,
+ * wrong for anything that wrote its own `status` value and needs to read it
+ * back unchanged (systemKnowledgeService.ts's 'indexed' | 'failed' |
+ * 'disabled' | 'indexing', and retrievalService.ts's provenance summary).
+ * Comparing `doc.status === 'indexed'` against a `getDocuments()` result is
+ * a silent bug -- that field has already been overwritten to 'indexed_clean'
+ * by the time you see it. Use this instead for any raw-status read.
+ */
+export function getDocumentsRaw(): KBDocument[] {
+  initStorage();
+  try {
+    const raw = fs.readFileSync(DOCUMENTS_FILE, 'utf-8');
+    return raw.trim() ? (JSON.parse(raw) as KBDocument[]) : [];
+  } catch (err) {
+    console.error('Error reading documents database:', err);
+    fs.writeFileSync(DOCUMENTS_FILE, JSON.stringify([], null, 2), 'utf-8');
+    return [];
+  }
+}
+
 export function getDocuments(): KBDocument[] {
   initStorage();
   try {
     const raw = fs.readFileSync(DOCUMENTS_FILE, 'utf-8');
     const docs = raw.trim() ? JSON.parse(raw) as KBDocument[] : [];
-    
+
     // Map existing fields to expected new unified format for frontend
     return docs.map(doc => {
       let derivedStatus: 'indexed_clean' | 'indexed_warning' | 'failed' | 'processing' = 'indexed_clean';
@@ -377,33 +406,51 @@ export function saveChunks(newChunks: KBChunk[]): void {
 }
 
 /**
- * Clean heuristic text embedding builder. Uses a bag-of-words / TF-IDF equivalent representation
- * as a robust local vectorizer. This serves as a flawless, stable fallback
- * and search algorithm if Gemini API key fails or is restricted.
+ * Local fallback embedding dimension. Fixed and exported so every caller
+ * that needs to know the shape of a local-heuristic vector (retrieval's
+ * dimension-mismatch check, embeddingService's backend descriptor) agrees
+ * with what this function actually produces.
  */
-export function generateLocalHeuristicEmbedding(text: string): number[] {
-  const words = text.toLowerCase().match(/\b[a-z]{3,}\b/g) || [];
-  const vocab = [
-    'summary', 'procedure', 'preparation', 'safety', 'warning', 'caution', 'note',
-    'active', 'imperative', 'short', 'sentence', 'abbreviation', 'terminology',
-    'hardware', 'software', 'policy', 'physical', 'config', 'calibration', 'loto',
-    'isolate', 'depressurize', 'vent', 'pressure', 'torque', 'fittings', 'flange',
-    'units', 'spelling', 'operator', 'readability', 'standard', 'template', 'benefit',
-    'problem', 'cause', 'solution', 'confirm', 'suggested', 'review', 'techcom'
-  ];
+export const LOCAL_EMBEDDING_DIMENSIONS = 256;
 
-  const freqs = new Array(vocab.length).fill(0);
-  words.forEach(w => {
-    const idx = vocab.indexOf(w);
-    if (idx !== -1) {
-      freqs[idx]++;
+/**
+ * Deterministic hashed bag-of-words embedding. Used when a Gemini API key is
+ * unavailable (or, previously, silently on any embedding error -- that
+ * silent-on-error behavior has been removed from embeddingService.ts;
+ * this function is now reached only for the "no key configured" case,
+ * which is intentional graceful degradation, not a bug).
+ *
+ * This replaces an earlier version keyed to a hardcoded 41-word vocabulary:
+ * any chunk whose text didn't contain one of those 41 words produced an
+ * all-zero vector, and cosine similarity against an all-zero vector is
+ * always 0 -- silently unretrievable. Hashing every token into a fixed-size
+ * bucket removes the vocabulary ceiling entirely: every word, including a
+ * synthetic canary token like "approx-QX7" or a real technical term with no
+ * synonym on this project's radar, contributes to the vector.
+ */
+export function generateLocalHeuristicEmbedding(
+  text: string,
+  dimensions: number = LOCAL_EMBEDDING_DIMENSIONS,
+): number[] {
+  const tokens = text.toLowerCase().match(/[a-z0-9]{2,}/g) || [];
+  const freqs = new Array(dimensions).fill(0);
+
+  tokens.forEach((token) => {
+    // FNV-1a: cheap, deterministic, no external dependency, good enough
+    // bucket-distribution for a bag-of-words fallback (not a real embedding
+    // model -- see the module doc comment in embeddingService.ts).
+    let hash = 0x811c9dc5;
+    for (let i = 0; i < token.length; i++) {
+      hash ^= token.charCodeAt(i);
+      hash = Math.imul(hash, 0x01000193);
     }
+    const bucket = Math.abs(hash) % dimensions;
+    freqs[bucket]++;
   });
 
-  // Normalize vector
-  const mag = Math.sqrt(freqs.reduce((sum, val) => sum + (val * val), 0));
+  const mag = Math.sqrt(freqs.reduce((sum, val) => sum + val * val, 0));
   if (mag === 0) {
     return freqs;
   }
-  return freqs.map(f => f / mag);
+  return freqs.map((f) => f / mag);
 }

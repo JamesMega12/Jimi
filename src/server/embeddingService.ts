@@ -1,43 +1,78 @@
 import { GoogleGenAI } from '@google/genai';
-import { generateLocalHeuristicEmbedding } from './knowledgeBaseService';
+import { generateLocalHeuristicEmbedding, LOCAL_EMBEDDING_DIMENSIONS } from './knowledgeBaseService';
+
+// `text-embedding-004` (the model this file previously hardcoded) 404s as
+// unavailable for embedContent on at least some API keys/projects -- verified
+// against a real key during this feature's development, where `models?key=...`
+// listed `gemini-embedding-001` (3072-dim) as the actually-supported
+// embedContent model instead. Using the wrong dimension here would silently
+// reintroduce the dimension-mismatch bug this module exists to fix, so this
+// value must match whatever GEMINI_EMBEDDING_MODEL actually returns -- verify
+// with a real call before changing either constant.
+const GEMINI_EMBEDDING_MODEL = 'gemini-embedding-001';
+const GEMINI_EMBEDDING_DIMENSIONS = 3072;
+
+export interface EmbeddingBackend {
+  id: string;
+  dimensions: number;
+}
+
+function hasUsableApiKey(): boolean {
+  const apiKey = process.env.GEMINI_API_KEY;
+  return !!apiKey && apiKey !== 'MY_GEMINI_API_KEY' && apiKey.trim() !== '';
+}
 
 /**
- * Generates an embedding vector (number array) for a text.
- * Calls Gemini if available, otherwise falls back to local heuristic vector.
+ * Which embedding backend a chunk embedded *right now* would use. Stamped
+ * onto every chunk at ingest time so retrieval can detect a query embedded
+ * under one backend being scored against chunks embedded under another --
+ * previously an unannounced 768-dim vs 41-dim mismatch that silently scored
+ * 0 for every affected chunk (retrievalService.ts cosineSimilarity's
+ * `a.length !== b.length` early return). The dimension is authoritative
+ * here; retrieval compares it against each chunk's actual embedding length.
+ */
+export function getEmbeddingBackendId(): EmbeddingBackend {
+  if (hasUsableApiKey()) {
+    return { id: GEMINI_EMBEDDING_MODEL, dimensions: GEMINI_EMBEDDING_DIMENSIONS };
+  }
+  return { id: 'local-hashed-bow-v1', dimensions: LOCAL_EMBEDDING_DIMENSIONS };
+}
+
+/**
+ * Generates an embedding vector for a text. Falls back to a local heuristic
+ * vector only when no usable API key is configured at all -- that is
+ * intentional graceful degradation (see `.claude/skills/run-techcom-workspace`:
+ * "the app degrades gracefully without a working key"). It deliberately does
+ * NOT fall back on a request error when a key *is* configured: silently
+ * substituting a 256-dim local vector for what should have been a 768-dim
+ * Gemini vector reproduces the exact silent dimension-mismatch bug this
+ * module exists to fix. Callers that can tolerate a failed embedding call
+ * (e.g. marking one document ingestion as failed rather than crashing the
+ * server) should catch this themselves.
  */
 export async function generateTextEmbedding(text: string): Promise<number[]> {
-  const apiKey = process.env.GEMINI_API_KEY;
-  if (!apiKey || apiKey === "MY_GEMINI_API_KEY" || apiKey.trim() === "") {
-    console.warn("No GEMINI_API_KEY for embedding generation, using local heuristic fallback.");
+  if (!hasUsableApiKey()) {
     return generateLocalHeuristicEmbedding(text);
   }
 
-  try {
-    console.log(`[Gemini Embedding] Dispatching embedContent request... payload size: ${text.length} characters`);
-    const ai = new GoogleGenAI({
-      apiKey: apiKey,
-      httpOptions: {
-        headers: {
-          'User-Agent': 'aistudio-build',
-        }
-      }
-    });
+  const apiKey = process.env.GEMINI_API_KEY as string;
+  const ai = new GoogleGenAI({
+    apiKey,
+    httpOptions: {
+      headers: {
+        'User-Agent': 'aistudio-build',
+      },
+    },
+  });
 
-    const modelName = 'text-embedding-004';
-    const response: any = await ai.models.embedContent({
-      model: modelName,
-      contents: text
-    });
+  const response: any = await ai.models.embedContent({
+    model: GEMINI_EMBEDDING_MODEL,
+    contents: text,
+  });
 
-    if (response && response.embeddings && response.embeddings.length > 0 && response.embeddings[0].values) {
-      console.log(`[Gemini Embedding] Success. Received vector of dimension ${response.embeddings[0].values.length}`);
-      return response.embeddings[0].values;
-    }
-
-    console.warn("[Gemini Embedding] Unexpected response layout from Gemini embedding API. Using local heuristic fallback.");
-    return generateLocalHeuristicEmbedding(text);
-  } catch (err: any) {
-    console.error("[Gemini Embedding] Failed to generate embedding with Gemini API:", err.message || err);
-    return generateLocalHeuristicEmbedding(text);
+  const values = response?.embeddings?.[0]?.values;
+  if (!values || !Array.isArray(values) || values.length === 0) {
+    throw new Error('Gemini embedding API returned an unexpected response shape (no embedding values).');
   }
+  return values;
 }

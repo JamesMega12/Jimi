@@ -9,7 +9,10 @@
     "start": "node dist/server.cjs",
     "clean": "rm -rf dist",
     "lint": "tsc --noEmit",
-    "test": "node test-runner.mjs"
+    "test": "node test-runner.mjs",
+    "knowledge:sync": "tsx scripts/systemKnowledge.ts sync",
+    "knowledge:status": "tsx scripts/systemKnowledge.ts status",
+    "knowledge:convert": "tsx scripts/systemKnowledge.ts convert"
   },
   "dependencies": {
     "@google/genai": "^2.4.0",
