@@ -693,9 +693,13 @@ export default function AppWorkflow() {
 
       {/* Developer Knowledge & Instructions Overlay */}
       {showDevKnowledge && developerMode && (
-        <DeveloperKnowledgePanel 
-          onClose={() => setShowDevKnowledge(false)} 
+        <DeveloperKnowledgePanel
+          onClose={() => setShowDevKnowledge(false)}
           latestTrace={response?.diagnostics?.instructionTrace}
+          latestGrounding={drafting.lastGrounding ?? response?.grounding}
+          latestCorrections={(drafting.lastDeterministicCorrections && drafting.lastDeterministicCorrections.length)
+            ? drafting.lastDeterministicCorrections
+            : response?.deterministicCorrections}
         />
       )}
     </div>

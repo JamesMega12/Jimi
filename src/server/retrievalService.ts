@@ -122,6 +122,32 @@ export function filterChunksBySettings(chunks: KBChunk[]): KBChunk[] {
   return [...systemChunks, ...selected];
 }
 
+/**
+ * Distinct section titles + rule categories of the currently-indexed
+ * system-knowledge chunks (the approved handbook, or its synthetic stand-in).
+ *
+ * This is what lets query generation stop being a fixed 4-keyword allowlist:
+ * instead of a developer hardcoding which handbook topics can ever be
+ * retrieved, the trigger set self-expands with the handbook's own structure.
+ * A topic here only becomes an actual query if its words also appear in the
+ * user's draft (see retrieveRelevantChunks), so this is a candidate list, not
+ * an unconditional query set.
+ *
+ * Titles shorter than 4 chars or that look like page-number pseudo-headings
+ * ("12 of 198 --", produced by the legacy uploader) are excluded so they
+ * don't pollute the trigger set.
+ */
+export function getKnownSectionTopics(chunks: KBChunk[]): string[] {
+  const topics = new Set<string>();
+  for (const c of chunks) {
+    if (c.sourceType !== 'system_knowledge') continue;
+    const title = (c.sectionTitle || '').trim();
+    if (title.length >= 4 && !/^\d+\s+of\s+\d+/i.test(title)) topics.add(title);
+    if (c.ruleCategory) topics.add(c.ruleCategory);
+  }
+  return Array.from(topics);
+}
+
 function summarizeSystemSources(): KnowledgeProvenanceSourceSummary[] {
   // Filter on chunkCount, not status === 'indexed': a source whose most
   // recent re-ingest attempt failed keeps status: 'failed' for visibility,
@@ -190,26 +216,59 @@ export async function retrieveRelevantChunks(
       };
     }
 
+    // Generic structural guidance, always searched (not tied to the user's
+    // specific words): summary shape, procedure voice, warning/caution form.
     const queries = [
        "FCO Summary Problem Cause Solution Benefit concise field-friendly wording",
        "procedure active voice operator-friendly numbered steps simplified technical English",
        "WARNING CAUTION Note safety instruction technical procedure wording"
     ];
 
-    let dyn = [];
+    // Highest-leverage change: search the user's ACTUAL draft text as its own
+    // query, not just a set of hardcoded keyword triggers. This is what lets a
+    // handbook rule with no keyword trigger (a company-abbreviation rule, a
+    // city-naming rule, a spelling preference) get retrieved at all, now that
+    // the embedding backend produces dimension-matched, non-zero similarity.
+    // Capped well under gemini-embedding-001's input limit (~2048 tokens);
+    // 6000 chars is a conservative ~1500-token ceiling. If longer, the head of
+    // the combined draft is embedded -- adequate for topical matching.
+    const RAW_QUERY_CHAR_CAP = 6000;
+    const rawInputQuery = [request.rawSummary, request.rawProcedure, request.customDirectives]
+      .filter(Boolean)
+      .join('\n')
+      .trim()
+      .slice(0, RAW_QUERY_CHAR_CAP);
+    if (rawInputQuery.length > 0) queries.push(rawInputQuery);
+
     const fullInputLower = (request.rawSummary + ' ' + request.rawProcedure + ' ' + request.customDirectives).toLowerCase();
 
-    if (fullInputLower.includes('°c') || fullInputLower.includes('celsius')) dyn.push("temperature degC unit symbols Celsius");
-    if (fullInputLower.includes('loto')) dyn.push("abbreviation first use LOTO Lockout Tagout");
-    if (fullInputLower.includes('psi') || fullInputLower.includes('kpa') || fullInputLower.includes('mpa')) dyn.push("pressure unit symbols psi kPa MPa");
-    if (fullInputLower.includes('fig ') || fullInputLower.includes('figure') || fullInputLower.includes('table')) dyn.push("figure caption table title formatting Fig Figure Table");
+    // Self-expanding trigger set derived from the handbook's own section
+    // titles / rule categories: any indexed topic whose words appear in the
+    // user's draft becomes its own query. Replaces the old fixed 4-keyword
+    // allowlist as the primary mechanism.
+    const inputWords = new Set(fullInputLower.split(/\s+/).filter((w) => w.length >= 4));
+    for (const topic of getKnownSectionTopics(chunks)) {
+      const topicWords = topic.toLowerCase().split(/\s+/).filter((w) => w.length >= 4);
+      if (topicWords.some((w) => inputWords.has(w))) queries.push(topic);
+    }
 
-    if (dyn.length > 0) queries.push(dyn.join(' '));
+    // Floor: the original hardcoded triggers still fire, covering common cases
+    // even when no handbook is indexed yet (so retrieval degrades gracefully
+    // before Phase 5 lands the real document). Each is its own query rather
+    // than being concatenated, so multiple triggers don't dilute one another.
+    if (fullInputLower.includes('°c') || fullInputLower.includes('celsius')) queries.push("temperature degC unit symbols Celsius");
+    if (fullInputLower.includes('loto')) queries.push("abbreviation first use LOTO Lockout Tagout");
+    if (fullInputLower.includes('psi') || fullInputLower.includes('kpa') || fullInputLower.includes('mpa')) queries.push("pressure unit symbols psi kPa MPa");
+    if (fullInputLower.includes('fig ') || fullInputLower.includes('figure') || fullInputLower.includes('table')) queries.push("figure caption table title formatting Fig Figure Table");
+
+    // De-duplicate query strings so a topic that matches both a section title
+    // and a hardcoded trigger isn't embedded twice.
+    const uniqueQueries = Array.from(new Set(queries));
 
     let allResults: { source: GroundingSource, score: number }[] = [];
     let allMatchedCategories = new Set<string>();
 
-    for (const q of queries) {
+    for (const q of uniqueQueries) {
         const res = await retrieveRelevantChunksForQuery(q, chunks, 3);
         logEvent('debug', 'knowledge_query', { query: q, resultCount: res.length, topScore: res[0]?.score });
         allResults.push(...res);

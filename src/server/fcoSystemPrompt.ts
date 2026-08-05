@@ -210,7 +210,7 @@ Follow these rules:
 - Preserve configuration names exactly.
 - Preserve policy/document names exactly.
 - Preserve SWI, manual, ACP, drawing, figure, and InTouch references exactly.
-- Preserve pressure, torque, temperature, dimension, quantity, and time values exactly as provided.
+- Preserve pressure, torque, temperature, dimension, quantity, and time values exactly as provided. (Unit notation may be normalized to the approved handbook form, e.g. "degC" for degree Celsius; the numeric value itself must never change.)
 - Preserve sequence, part numbers, SWI documents, figures, and tables exactly as provided.
 - Do not invent technical values.
 - Do not invent validation results.

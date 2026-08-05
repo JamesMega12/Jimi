@@ -2,14 +2,17 @@ import React, { useState, useEffect, useRef } from 'react';
 import { X, BookOpen, Layers, TerminalSquare, AlertTriangle, ShieldCheck, CheckCircle2 } from 'lucide-react';
 import { InstructionTrace } from '../server/instructionPacks/types';
 import { parseJsonResponse } from '../utils/apiResponse';
+import GroundingPanel from './GroundingPanel';
 
 interface DeveloperKnowledgePanelProps {
   onClose: () => void;
   latestTrace?: any;
+  latestGrounding?: any;
+  latestCorrections?: any[];
 }
 
-export default function DeveloperKnowledgePanel({ onClose, latestTrace }: DeveloperKnowledgePanelProps) {
-  const [activeTab, setActiveTab] = useState<'config' | 'drafts' | 'test' | 'summary' | 'procedure' | 'prompt' | 'trace' | 'ste'>('config');
+export default function DeveloperKnowledgePanel({ onClose, latestTrace, latestGrounding, latestCorrections }: DeveloperKnowledgePanelProps) {
+  const [activeTab, setActiveTab] = useState<'config' | 'drafts' | 'test' | 'summary' | 'procedure' | 'prompt' | 'trace' | 'grounding' | 'ste'>('config');
   const [loading, setLoading] = useState(false);
   const [data, setData] = useState<any>(null);
   const [drafts, setDrafts] = useState<any[]>([]);
@@ -315,6 +318,9 @@ export default function DeveloperKnowledgePanel({ onClose, latestTrace }: Develo
           </button>
           <button onClick={() => setActiveTab('trace')} className={tabClasses('trace')}>
             Instruction Trace
+          </button>
+          <button onClick={() => setActiveTab('grounding')} className={tabClasses('grounding')}>
+            Grounding & Corrections
           </button>
           <button onClick={() => setActiveTab('ste')} className={tabClasses('ste')}>
             STE Guidance
@@ -664,6 +670,20 @@ export default function DeveloperKnowledgePanel({ onClose, latestTrace }: Develo
                 <div className="p-8 bg-slate-50 border border-slate-200 rounded-xl text-center text-slate-500 font-medium">
                   <TerminalSquare className="w-8 h-8 mx-auto mb-2 opacity-50" />
                   No instruction trace available yet. Run a rewrite or evaluate-summary first.
+                </div>
+              )}
+            </div>
+          )}
+
+          {activeTab === 'grounding' && (
+            <div className="space-y-4">
+              <h2 className="text-lg font-bold text-slate-800 mb-2">Grounding &amp; Deterministic Corrections</h2>
+              {(latestGrounding || (latestCorrections && latestCorrections.length)) ? (
+                <GroundingPanel grounding={latestGrounding} corrections={latestCorrections} />
+              ) : (
+                <div className="p-8 bg-slate-50 border border-slate-200 rounded-xl text-center text-slate-500 font-medium">
+                  <ShieldCheck className="w-8 h-8 mx-auto mb-2 opacity-50" />
+                  No grounding diagnostics yet. Run a rewrite first — retrieval provenance and deterministic corrections are attached to the rewrite response.
                 </div>
               )}
             </div>
