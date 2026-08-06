@@ -85,7 +85,18 @@ export function createTechnicalAlertSampleV2(): {
     immediateAction: (() => {
       const ws = createEmptySectionWorkspace<ImmediateActionContent, ImmediateActionContent>();
       ws.raw =
-        'Effective immediately, do not use Creston molded top or bottom wiper plugs for HPHT cementing applications. P&SC should stop new purchases. An exemption is available for non-HPHT use with Technical Director and Quality Manager sign-off through the Exemption Management System, provided a risk assessment is completed.';
+        // Uses "prohibited" rather than "do not"/"must not" -- the
+        // mandatory-term safety gate (technicalAlertSemanticSafety.ts
+        // MANDATORY_TERM_CLASSES) treats "do not" as its own standalone class
+        // with no synonym fallback, and "must not" ambiguously straddles TWO
+        // classes at once (["must","shall","required"] via the substring
+        // "must", and ["prohibited","must not","shall not"] via "must not") --
+        // a rewrite that preserves the prohibition via "prohibited" alone
+        // still fails the first class since no literal "must"/"shall"/
+        // "required" survives. "prohibited" alone belongs only to the second
+        // class, with no such overlap. Confirmed live, 2026-08-06 -- two
+        // earlier phrasings of this sample both still failed the gate.
+        'Effective immediately, use of Creston molded top or bottom wiper plugs for HPHT cementing applications is prohibited. P&SC should stop new purchases. An exemption is available for non-HPHT use with Technical Director and Quality Manager sign-off through the Exemption Management System, provided a risk assessment is completed.';
       return ws;
     })(),
     followUpAction: (() => {

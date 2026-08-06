@@ -28,7 +28,15 @@ interface Props {
 
 const OBLIGATION_OPTIONS: ObligationStrength[] = ['mandatory', 'prohibited', 'conditional', 'advisory', 'unclear'];
 const CATEGORY_OPTIONS: FollowUpCategory[] = ['monitoring', 'reporting', 'procedural_update', 'replacement', 'engineering_change', 'way_forward'];
-const EMPTY: FollowUpActionContent = { items: [], notApplicable: false };
+// Pre-seeded with one empty action item rather than starting fully empty, so
+// the section shows something ready to fill in immediately instead of
+// requiring "+ Add Follow-Up Action Item" first. Purely a display fallback --
+// read-only until the user edits a field, at which point it becomes real
+// committed state under the same id (see updateItem below).
+const EMPTY: FollowUpActionContent = {
+  items: [{ id: 'default-item', actor: [], requiredAction: '', obligationStrength: 'advisory' }],
+  notApplicable: false,
+};
 
 function newActionItem(): ActionItem {
   return { id: crypto.randomUUID(), actor: [], requiredAction: '', obligationStrength: 'advisory' };
@@ -43,11 +51,18 @@ type OpStatus =
   | { kind: 'failed'; op: 'analyze' | 'rewrite' };
 
 export default function FollowUpActionWorkspace({ workspace, onChange }: Props) {
-  const [instructions, setInstructions] = useState('');
+  // FCO-style reveal: see SummaryWorkspace.tsx for the full rationale.
+  const [editMode, setEditMode] = useState(false);
   const [opStatus, setOpStatus] = useState<OpStatus>({ kind: 'idle' });
   const [warnings, setWarnings] = useState<{ gate: string; message: string }[]>([]);
   const suggestionRef = useRef<HTMLDivElement>(null);
   const content = workspace.analysis.components ?? EMPTY;
+
+  // See SummaryWorkspace.tsx for the full rationale -- mirrors the latest
+  // `workspace` prop so handleAnalyze/handleRewrite can check staleness
+  // synchronously before calling onChange, instead of inside its updater.
+  const workspaceRef = useRef(workspace);
+  useEffect(() => { workspaceRef.current = workspace; }, [workspace]);
 
   useEffect(() => {
     if (opStatus.kind !== 'succeeded') return;
@@ -69,11 +84,9 @@ export default function FollowUpActionWorkspace({ workspace, onChange }: Props) 
     onChange(prev => beginRequest(prev, requestId));
     try {
       const result = await analyzeFollowUpAction(workspace.raw);
-      onChange(prev => {
-        if (!isResponseCurrent(prev, requestId)) return prev;
-        setOpStatus({ kind: 'succeeded', op: 'analyze' });
-        return applyAnalysisResult(prev, result, []);
-      });
+      if (!isResponseCurrent(workspaceRef.current, requestId)) return;
+      onChange(prev => applyAnalysisResult(prev, result, []));
+      setOpStatus({ kind: 'succeeded', op: 'analyze' });
     } catch (err: any) {
       setOpStatus({ kind: 'failed', op: 'analyze' });
       onChange(prev => failRequest(prev, requestId, err.message || 'Failed to analyze follow-up action.'));
@@ -86,14 +99,12 @@ export default function FollowUpActionWorkspace({ workspace, onChange }: Props) 
     setWarnings([]);
     onChange(prev => beginRequest(prev, requestId));
     try {
-      const { result, warnings: newWarnings } = await rewriteFollowUpAction(workspace.raw, content, instructions);
-      onChange(prev => {
-        if (!isResponseCurrent(prev, requestId)) return prev;
-        setOpStatus({ kind: 'succeeded', op: 'rewrite' });
-        setWarnings(newWarnings || []);
-        setTimeout(() => suggestionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' }), 50);
-        return applySuggestion(prev, result, requestId);
-      });
+      const { result, warnings: newWarnings } = await rewriteFollowUpAction(workspace.raw, content);
+      if (!isResponseCurrent(workspaceRef.current, requestId)) return;
+      onChange(prev => applySuggestion(prev, result, requestId));
+      setOpStatus({ kind: 'succeeded', op: 'rewrite' });
+      setWarnings(newWarnings || []);
+      setTimeout(() => suggestionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' }), 50);
     } catch (err: any) {
       setOpStatus({ kind: 'failed', op: 'rewrite' });
       onChange(prev => failRequest(prev, requestId, err.message || 'Failed to rewrite follow-up action.'));
@@ -103,18 +114,29 @@ export default function FollowUpActionWorkspace({ workspace, onChange }: Props) 
   const handleAccept = () => {
     onChange(prev => acceptSuggestion(prev));
     setWarnings([]);
+    setEditMode(false);
   };
   const handleDismiss = () => {
     onChange(prev => dismissSuggestion(prev));
     setWarnings([]);
   };
-  const handleManualAccept = () => onChange(prev => manualAccept(prev, content));
-  const handleAcceptNotApplicable = () => onChange(prev => manualAccept(prev, { items: [], notApplicable: true }));
+  const handleManualAccept = () => {
+    onChange(prev => manualAccept(prev, content));
+    setEditMode(false);
+  };
+  const handleAcceptNotApplicable = () => {
+    onChange(prev => manualAccept(prev, { items: [], notApplicable: true }));
+    setEditMode(false);
+  };
 
   const stale = isStale(workspace);
   const analyzeLabel = opStatus.kind === 'analyzing' ? 'Analyzing…' : 'Analyze';
   const rewriteLabel = opStatus.kind === 'rewriting' ? 'Rewriting…' : 'Rewrite with AI';
   const busy = workspace.loading;
+  // Both a filled item and an explicit Not Applicable are valid "handled"
+  // states for this optional section.
+  const hasRequiredContent = content.notApplicable || content.items.some(i => !!i.requiredAction?.trim());
+  const showComponents = !!workspace.analysis.ranAt || hasRequiredContent;
 
   return (
     <div className="space-y-4">
@@ -125,6 +147,8 @@ export default function FollowUpActionWorkspace({ workspace, onChange }: Props) 
         {opStatus.kind === 'succeeded' && opStatus.op === 'rewrite' && 'Follow-up action rewrite ready for review.'}
         {opStatus.kind === 'failed' && `Follow-up action ${opStatus.op} failed.`}
       </div>
+      {(!workspace.accepted || editMode) && (
+        <>
       <div className="flex items-center justify-between">
         <label className="flex items-center gap-2 text-sm font-medium text-slate-700">
           <input type="checkbox" checked={content.notApplicable} onChange={e => setNotApplicable(e.target.checked)} />
@@ -148,7 +172,6 @@ export default function FollowUpActionWorkspace({ workspace, onChange }: Props) 
               placeholder="Paste rough follow-up/monitoring/reporting instructions here..."
             />
             <div className="flex gap-2 mt-2 items-center">
-              <input type="text" value={instructions} onChange={e => setInstructions(e.target.value)} placeholder="Optional rewrite instructions" className="flex-1 p-2 text-sm border border-slate-300 rounded-md" />
               <button onClick={handleAnalyze} disabled={busy || !workspace.raw.trim()} className="px-4 py-2 flex items-center gap-2 bg-slate-800 text-white rounded-md text-sm font-medium hover:bg-slate-700 disabled:opacity-50">
                 {opStatus.kind === 'analyzing' && <Loader2 className="w-4 h-4 animate-spin" />}
                 {analyzeLabel}
@@ -165,11 +188,10 @@ export default function FollowUpActionWorkspace({ workspace, onChange }: Props) 
             </div>
           )}
 
-          
-
+          {showComponents && (
           <div className="p-4 bg-amber-50 border border-amber-100 rounded-lg space-y-3">
               <h4 className="font-bold text-slate-800 flex items-center gap-2">
-                <CheckCircle2 className="w-5 h-5 text-emerald-600" /> Follow-Up Action Items
+                {hasRequiredContent && <CheckCircle2 className="w-5 h-5 text-emerald-600" />} Follow-Up Action Items
               </h4>
               {content.items.map(item => (
                 <div key={item.id} className="bg-white p-3 rounded-lg border border-slate-200 space-y-2">
@@ -189,7 +211,7 @@ export default function FollowUpActionWorkspace({ workspace, onChange }: Props) 
                       <FieldHint text={ACTION_FIELD_GUIDANCE.obligationStrength.hint} />
                     </div>
                   </div>
-                  <Collapsible label="Advanced (timing, category)" defaultOpen={!!(item.timing || item.followUpCategory)}>
+                  <Collapsible label="Advanced (timing, category)">
                     <div className="grid grid-cols-2 gap-2">
                       <div>
                         <input type="text" value={item.timing || ''} onChange={e => updateItem(item.id, { timing: e.target.value || undefined })} placeholder={ACTION_FIELD_GUIDANCE.timing.placeholder} className="w-full p-1.5 border rounded text-sm" />
@@ -222,7 +244,7 @@ export default function FollowUpActionWorkspace({ workspace, onChange }: Props) 
                 </button>
               </div>
             </div>
-          
+          )}
 
           {opStatus.kind === 'failed' && (
             <div className="p-3 bg-red-50 border border-red-200 rounded-lg text-sm text-red-800 flex items-start gap-2">
@@ -260,8 +282,10 @@ export default function FollowUpActionWorkspace({ workspace, onChange }: Props) 
           )}
         </>
       )}
+        </>
+      )}
 
-      {workspace.accepted && (
+      {workspace.accepted && !editMode && (
         <div className={`p-4 border rounded-lg ${stale ? 'bg-amber-50 border-amber-200' : 'bg-emerald-50 border-emerald-200'}`}>
           <h4 className={`font-bold mb-2 flex items-center gap-2 ${stale ? 'text-amber-900' : 'text-emerald-900'}`}>
             {stale && <AlertCircle className="w-4 h-4" />}
@@ -275,6 +299,9 @@ export default function FollowUpActionWorkspace({ workspace, onChange }: Props) 
               {workspace.accepted.value.items.map(i => <li key={i.id}>{i.instructionText || i.requiredAction} <span className="font-semibold">({i.obligationStrength})</span></li>)}
             </ul>
           )}
+          <button onClick={() => setEditMode(true)} className="text-xs font-semibold text-slate-600 hover:text-slate-800 hover:underline mt-3">
+            Edit / Redraft
+          </button>
         </div>
       )}
     </div>

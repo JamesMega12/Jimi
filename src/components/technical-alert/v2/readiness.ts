@@ -27,7 +27,7 @@ export interface ReadinessInput {
 }
 
 function isStaleView(v: SectionAcceptedView<unknown>): boolean {
-  return v.freshness === 'stale' || v.staleDueToControlChange;
+  return v.freshness === 'stale' || v.staleDueToControlChange || v.staleDueToNeighborChange;
 }
 
 export function computeTechnicalAlertReadinessV2(input: ReadinessInput): Readiness {

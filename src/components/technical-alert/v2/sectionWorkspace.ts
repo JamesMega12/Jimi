@@ -18,6 +18,7 @@ export function createEmptySectionWorkspace<TComponents, TAccepted>(
     accepted: null,
     freshness: 'fresh',
     staleDueToControlChange: false,
+    staleDueToNeighborChange: false,
     currentRevision: { revision: 0 },
     inFlightRequest: null,
     loading: false,
@@ -132,7 +133,8 @@ export function dismissSuggestion<TComponents, TAccepted>(
  * before calling this does not change its AI provenance. */
 export function acceptSuggestion<TComponents, TAccepted>(
   ws: SectionWorkspace<TComponents, TAccepted>,
-  now: string = new Date().toISOString()
+  now: string = new Date().toISOString(),
+  groundedOnNeighbors?: Record<string, string | null>
 ): SectionWorkspace<TComponents, TAccepted> {
   if (ws.suggestion.value === null) return ws;
   return {
@@ -142,10 +144,12 @@ export function acceptSuggestion<TComponents, TAccepted>(
       source: 'ai',
       basedOn: ws.currentRevision,
       acceptedAt: now,
+      groundedOnNeighbors,
     },
     suggestion: { value: null, basedOn: null, requestId: null },
     freshness: 'fresh',
     staleDueToControlChange: false,
+    staleDueToNeighborChange: false,
   };
 }
 
@@ -162,6 +166,7 @@ export function manualAccept<TComponents, TAccepted>(
     suggestion: { value: null, basedOn: null, requestId: null },
     freshness: 'fresh',
     staleDueToControlChange: false,
+    staleDueToNeighborChange: false,
   };
 }
 
@@ -178,6 +183,7 @@ export function editAcceptedDirectly<TComponents, TAccepted>(
     accepted: { ...ws.accepted, value, basedOn: ws.currentRevision, acceptedAt: now },
     freshness: 'fresh',
     staleDueToControlChange: false,
+    staleDueToNeighborChange: false,
   };
 }
 
@@ -191,8 +197,19 @@ export function markStaleDueToControlChange<TComponents, TAccepted>(
   return { ...ws, staleDueToControlChange: true };
 }
 
+/** A neighbor section this content was AI-grounded on (see
+ * SummaryAccepted.groundedOnNeighbors) was re-accepted with different
+ * content. Same "distinct cause from a raw/component edit" rationale as
+ * markStaleDueToControlChange (RC7, 2026-08-06). */
+export function markStaleDueToNeighborChange<TComponents, TAccepted>(
+  ws: SectionWorkspace<TComponents, TAccepted>
+): SectionWorkspace<TComponents, TAccepted> {
+  if (!ws.accepted) return ws;
+  return { ...ws, staleDueToNeighborChange: true };
+}
+
 export function isStale<TComponents, TAccepted>(ws: SectionWorkspace<TComponents, TAccepted>): boolean {
-  return ws.freshness === 'stale' || ws.staleDueToControlChange;
+  return ws.freshness === 'stale' || ws.staleDueToControlChange || ws.staleDueToNeighborChange;
 }
 
 /** Stale-response guard: a response is only current if its requestId matches

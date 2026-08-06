@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
-import { Sparkles, Trash2, ArrowLeft, ArrowRight } from 'lucide-react';
+import { Sparkles, Trash2, ArrowLeft, ArrowRight, CheckCircle2, AlertCircle, ChevronDown } from 'lucide-react';
 import { AccordionSection, accordionSectionDomId, useDisclosure } from '../../common/Accordion';
-import { createEmptySectionWorkspace, markStaleDueToControlChange } from './sectionWorkspace';
+import { createEmptySectionWorkspace, markStaleDueToControlChange, markStaleDueToNeighborChange, isStale } from './sectionWorkspace';
 import {
   ImmediateActionContent,
   ReasonsAccepted,
@@ -99,7 +99,24 @@ export default function TechnicalAlertWorkflowV2() {
   const [supportingContent, setSupportingContent] = useState<SupportingContent>(loaded.state?.supportingContent ?? initialSupportingContent);
   const [exporting, setExporting] = useState(false);
   const [exportError, setExportError] = useState<string | null>(null);
-  const { isOpen, toggle, open, reset: resetAccordion } = useDisclosure(['immediateAction']);
+  const [exportSuccess, setExportSuccess] = useState(false);
+
+  // Transient "it worked" signal, same auto-dismiss pattern as each
+  // workspace's opStatus 'succeeded' state (see SummaryWorkspace.tsx) --
+  // export previously gave zero on-screen feedback on success (confirmed via
+  // live UX trace, 2026-08-06).
+  useEffect(() => {
+    if (!exportSuccess) return;
+    const t = setTimeout(() => setExportSuccess(false), 4000);
+    return () => clearTimeout(t);
+  }, [exportSuccess]);
+  // All sections start collapsed -- a single pre-expanded section on first
+  // load (previously 'immediateAction', the largest/densest section) had no
+  // labeled rationale and was a confirmed contributor to "overwhelming at the
+  // start" feedback (live UX trace, 2026-08-06). Revisit only if product
+  // confirms a deliberate "start here" section is wanted -- that needs an
+  // explicit affordance, not just leaving one open unexplained.
+  const { isOpen, toggle, open, reset: resetAccordion } = useDisclosure([]);
   const stageIndex = STAGES.findIndex(s => s.id === stage);
   
 
@@ -116,16 +133,35 @@ export default function TechnicalAlertWorkflowV2() {
   // local state by hand (fragile against future additions).
   const [draftGeneration, setDraftGeneration] = useState(0);
   const [showClearConfirm, setShowClearConfirm] = useState(false);
-  React.useEffect(() => {
-    console.log('[DEBUG] TechnicalAlertWorkflowV2 MOUNTED. Title:', administrativeMetadata.documentNumber, 'DraftGen:', draftGeneration);
-    return () => console.log('[DEBUG] TechnicalAlertWorkflowV2 UNMOUNTED');
-  }, [draftGeneration]);
+  const [readinessExpanded, setReadinessExpanded] = useState(false);
 
   // Persist on every change so a refresh or navigating away doesn't lose the draft.
   useEffect(() => {
-    console.log('[DEBUG] Auto-saving state. Title:', administrativeMetadata.documentNumber, 'Stage:', stage, 'DraftGen:', draftGeneration, 'Summary len:', sections.summary.raw.length, 'V2 exists:', !!window.localStorage.getItem('ta_workflow_state_v2'));
     saveTechnicalAlertStateV2({ administrativeMetadata, controlInformation, supportingContent, sections, stage });
   }, [administrativeMetadata, controlInformation, supportingContent, sections, stage]);
+
+  // Cross-section staleness: if Summary's accepted content was AI-generated
+  // using neighbor sections as read-only grounding, and a neighbor is later
+  // re-accepted with different content, that grounding is now out of date --
+  // mark Summary stale the same way staleDueToControlChange already does for
+  // control-info edits (RC7, 2026-08-06). Only fires for AI-sourced Summary
+  // content that actually recorded a grounding snapshot; manual accepts never
+  // used neighbors, so they're never touched by this.
+  useEffect(() => {
+    const summaryAccepted = sections.summary.accepted;
+    const grounded = summaryAccepted?.groundedOnNeighbors;
+    if (!summaryAccepted || summaryAccepted.source !== 'ai' || !grounded) return;
+    if (sections.summary.staleDueToNeighborChange) return;
+    const current: Record<string, string | null> = {
+      reasons: sections.reasons.accepted ? JSON.stringify(sections.reasons.accepted.value) : null,
+      immediateAction: sections.immediateAction.accepted ? JSON.stringify(sections.immediateAction.accepted.value) : null,
+      followUpAction: sections.followUpAction.accepted ? JSON.stringify(sections.followUpAction.accepted.value) : null,
+    };
+    const changed = Object.keys(current).some(k => current[k] !== (grounded[k] ?? null));
+    if (changed) {
+      setSections(prev => ({ ...prev, summary: markStaleDueToNeighborChange(prev.summary) }));
+    }
+  }, [sections.reasons.accepted, sections.immediateAction.accepted, sections.followUpAction.accepted, sections.summary.accepted, sections.summary.staleDueToNeighborChange]);
 
   const handleJumpToSection = (id: SectionId) => {
     setStage('drafting');
@@ -181,19 +217,11 @@ export default function TechnicalAlertWorkflowV2() {
     setStage('drafting');
     setMigrationFindings(null);
     setDraftGeneration(g => g + 1);
-    console.log('[DEBUG] After React state reset');
-
   };
 
-    const clearDraft = () => {
-    console.log('[DEBUG] clear handler entry. DraftGen:', draftGeneration, 'Title:', administrativeMetadata.title, 'Stage:', stage);
+  const clearDraft = () => {
     setShowClearConfirm(false);
-    console.log('[DEBUG] confirmation result: true');
-    console.log('[DEBUG] Before localStorage removal. V1:', !!window.localStorage.getItem('ta_workflow_state_v1'), 'V2:', !!window.localStorage.getItem('ta_workflow_state_v2'));
     clearPersistedTechnicalAlertStateV2();
-    console.log('[DEBUG] After localStorage removal. V1:', !!window.localStorage.getItem('ta_workflow_state_v1'), 'V2:', !!window.localStorage.getItem('ta_workflow_state_v2'));
-    console.log('[DEBUG] Before React state reset');
-    
     setAdministrativeMetadata(initialAdministrativeMetadata);
     setControlInformationState(initialControlInformation);
     setSupportingContent(initialSupportingContent);
@@ -203,7 +231,6 @@ export default function TechnicalAlertWorkflowV2() {
     setExportError(null);
     resetAccordion();
     setDraftGeneration(g => g + 1);
-    console.log('[DEBUG] After React state reset');
   };
 
   // The canonical snapshot -- computed once per render, consumed by both the
@@ -259,7 +286,7 @@ export default function TechnicalAlertWorkflowV2() {
             </div>
           ) : (
             <button
-              onClick={() => { console.log('[DEBUG] button click (Clear Draft)'); setShowClearConfirm(true); }}
+              onClick={() => setShowClearConfirm(true)}
               className="px-3 py-1.5 flex items-center justify-center gap-2 text-xs font-bold bg-slate-50 border border-slate-200 text-slate-600 hover:bg-slate-100 rounded-lg shadow-sm transition-colors"
               title="Clear the saved draft and start over"
             >
@@ -301,6 +328,48 @@ export default function TechnicalAlertWorkflowV2() {
 
       {stage === 'drafting' && (
         <>
+          {/* Collapsed-by-default readiness summary -- reuses the snapshot
+              already computed unconditionally above (no new computation) and
+              the same ReadinessPanel shown in Final Review, so Drafting and
+              Final Review can never disagree. Collapsed by default so it adds
+              a glanceable one-line status without reintroducing the density
+              problem this addresses (RC5/RC1). */}
+          <div className="mb-4">
+            <button
+              type="button"
+              onClick={() => setReadinessExpanded(v => !v)}
+              aria-expanded={readinessExpanded}
+              className={`w-full flex items-center justify-between px-4 py-2.5 rounded-lg border text-sm font-semibold transition-colors ${
+                currentSnapshot.readiness.status === 'Ready'
+                  ? 'bg-emerald-50 border-emerald-200 text-emerald-800 hover:bg-emerald-100'
+                  : currentSnapshot.readiness.status === 'Blocked'
+                  ? 'bg-red-50 border-red-200 text-red-800 hover:bg-red-100'
+                  : 'bg-amber-50 border-amber-200 text-amber-800 hover:bg-amber-100'
+              }`}
+            >
+              <span className="flex items-center gap-2">
+                {currentSnapshot.readiness.status === 'Ready' ? (
+                  <CheckCircle2 className="w-4 h-4" />
+                ) : (
+                  <AlertCircle className="w-4 h-4" />
+                )}
+                Readiness: {currentSnapshot.readiness.status}
+                {currentSnapshot.readiness.blockingIssues.length + currentSnapshot.readiness.warnings.length > 0 && (
+                  <span className="font-normal opacity-75">
+                    ({currentSnapshot.readiness.blockingIssues.length + currentSnapshot.readiness.warnings.length} item
+                    {currentSnapshot.readiness.blockingIssues.length + currentSnapshot.readiness.warnings.length === 1 ? '' : 's'})
+                  </span>
+                )}
+              </span>
+              <ChevronDown className={`w-4 h-4 transition-transform ${readinessExpanded ? 'rotate-180' : ''}`} />
+            </button>
+            {readinessExpanded && (
+              <div className="mt-2">
+                <ReadinessPanel readiness={currentSnapshot.readiness} />
+              </div>
+            )}
+          </div>
+
           <ControlInfoStrip
             key={`control-info-${draftGeneration}`}
             controlInformation={controlInformation}
@@ -311,7 +380,7 @@ export default function TechnicalAlertWorkflowV2() {
             <AccordionSection
               id="summary"
               title="Summary"
-              statusBadge={sectionStatus(!!sections.summary.accepted, sections.summary.freshness === 'stale' || sections.summary.staleDueToControlChange)}
+              statusBadge={sectionStatus(!!sections.summary.accepted, isStale(sections.summary))}
               isOpen={isOpen('summary')}
               onToggle={toggle}
             >
@@ -323,7 +392,7 @@ export default function TechnicalAlertWorkflowV2() {
             <AccordionSection
               id="reasons"
               title="Reasons"
-              statusBadge={sectionStatus(!!sections.reasons.accepted, sections.reasons.freshness === 'stale' || sections.reasons.staleDueToControlChange)}
+              statusBadge={sectionStatus(!!sections.reasons.accepted, isStale(sections.reasons))}
               isOpen={isOpen('reasons')}
               onToggle={toggle}
             >
@@ -335,7 +404,7 @@ export default function TechnicalAlertWorkflowV2() {
             <AccordionSection
               id="immediateAction"
               title="Immediate Action"
-              statusBadge={sectionStatus(!!sections.immediateAction.accepted, sections.immediateAction.freshness === 'stale' || sections.immediateAction.staleDueToControlChange)}
+              statusBadge={sectionStatus(!!sections.immediateAction.accepted, isStale(sections.immediateAction))}
               isOpen={isOpen('immediateAction')}
               onToggle={toggle}
             >
@@ -347,7 +416,7 @@ export default function TechnicalAlertWorkflowV2() {
             <AccordionSection
               id="followUpAction"
               title="Follow-Up Action"
-              statusBadge={sectionStatus(!!sections.followUpAction.accepted, sections.followUpAction.freshness === 'stale' || sections.followUpAction.staleDueToControlChange)}
+              statusBadge={sectionStatus(!!sections.followUpAction.accepted, isStale(sections.followUpAction))}
               isOpen={isOpen('followUpAction')}
               onToggle={toggle}
             >
@@ -372,6 +441,12 @@ export default function TechnicalAlertWorkflowV2() {
       {stage === 'finalReviewExport' && (
         <div className="space-y-4">
           {exportError && <div className="p-3 bg-red-50 border border-red-200 rounded-lg text-sm text-red-800">{exportError}</div>}
+          {exportSuccess && (
+            <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-lg text-sm text-emerald-800 flex items-center gap-2">
+              <CheckCircle2 className="w-4 h-4 flex-shrink-0" />
+              Technical Alert exported successfully.
+            </div>
+          )}
           <ReadinessPanel readiness={currentSnapshot.readiness} />
           <CrossSectionReviewPanel sections={sections} onJumpToSection={handleJumpToSection} />
           <FinalReviewPanel
@@ -380,11 +455,13 @@ export default function TechnicalAlertWorkflowV2() {
             onExport={async () => {
               setExporting(true);
               setExportError(null);
+              setExportSuccess(false);
               try {
                 // The same accepted-only payload shape the backend rebuilds its own
                 // snapshot from server-side -- the client never sends a pre-built
                 // snapshot, only the underlying accepted section state.
                 await exportTechnicalAlertDocxV2({ administrativeMetadata, controlInformation, supportingContent, sections });
+                setExportSuccess(true);
               } catch (err: any) {
                 setExportError(err.message || 'Failed to export DOCX.');
               } finally {
@@ -410,7 +487,7 @@ export default function TechnicalAlertWorkflowV2() {
         {stageIndex < STAGES.length - 1 && (
           <button
             onClick={() => setStage(STAGES[stageIndex + 1].id)}
-            className="px-4 py-2 flex items-center gap-2 bg-amber-600 text-white rounded-lg text-sm font-semibold hover:bg-amber-700"
+            className="px-4 py-2 flex items-center gap-2 bg-blue-600 text-white rounded-lg text-sm font-semibold hover:bg-blue-700"
           >
             Continue: {STAGES[stageIndex + 1].label.replace(/^\d+\.\s*/, '')}
             <ArrowRight className="w-4 h-4" />

@@ -27,7 +27,16 @@ interface Props {
 }
 
 const CAUSE_STATUS_OPTIONS: CauseStatus[] = ['confirmed', 'preliminary', 'suspected', 'unknown'];
-const EMPTY: ReasonsAccepted = {};
+// Pre-seeded with one empty narrative + evidence item rather than starting
+// fully empty, so the section shows something ready to fill in immediately
+// instead of requiring "+ Add Narrative"/"+ Add Evidence Item" first. Purely
+// a display fallback -- read-only until the user edits a field, at which
+// point it becomes real committed state under the same id (see
+// updateNarrativeField/updateEvidenceItem below).
+const EMPTY: ReasonsAccepted = {
+  narrative: { causeStatus: 'unknown' },
+  evidenceItems: [{ id: 'default-evidence', component: '', concern: '' }],
+};
 
 // Same local operation-status model as SummaryWorkspace -- see there for the
 // full rationale.
@@ -68,14 +77,21 @@ function ReasonsContent({ value }: { value: ReasonsAccepted }) {
 }
 
 export default function ReasonsWorkspace({ workspace, onChange }: Props) {
-  const [instructions, setInstructions] = useState('');
   const [causeStatusEdited, setCauseStatusEdited] = useState(false);
+  // FCO-style reveal: see SummaryWorkspace.tsx for the full rationale.
+  const [editMode, setEditMode] = useState(false);
   const [opStatus, setOpStatus] = useState<OpStatus>({ kind: 'idle' });
   const [warnings, setWarnings] = useState<{ gate: string; message: string }[]>([]);
   const suggestionRef = useRef<HTMLDivElement>(null);
   const content = workspace.analysis.components ?? EMPTY;
   const narrative = content.narrative;
   const evidenceItems = content.evidenceItems || [];
+
+  // See SummaryWorkspace.tsx for the full rationale -- mirrors the latest
+  // `workspace` prop so handleAnalyze/handleRewrite can check staleness
+  // synchronously before calling onChange, instead of inside its updater.
+  const workspaceRef = useRef(workspace);
+  useEffect(() => { workspaceRef.current = workspace; }, [workspace]);
 
   useEffect(() => {
     if (opStatus.kind !== 'succeeded') return;
@@ -111,11 +127,9 @@ export default function ReasonsWorkspace({ workspace, onChange }: Props) {
     onChange(prev => beginRequest(prev, requestId));
     try {
       const result = await analyzeReasons(workspace.raw);
-      onChange(prev => {
-        if (!isResponseCurrent(prev, requestId)) return prev;
-        setOpStatus({ kind: 'succeeded', op: 'analyze' });
-        return applyAnalysisResult(prev, result, []);
-      });
+      if (!isResponseCurrent(workspaceRef.current, requestId)) return;
+      onChange(prev => applyAnalysisResult(prev, result, []));
+      setOpStatus({ kind: 'succeeded', op: 'analyze' });
     } catch (err: any) {
       setOpStatus({ kind: 'failed', op: 'analyze' });
       onChange(prev => failRequest(prev, requestId, err.message || 'Failed to analyze reasons.'));
@@ -128,14 +142,12 @@ export default function ReasonsWorkspace({ workspace, onChange }: Props) {
     setWarnings([]);
     onChange(prev => beginRequest(prev, requestId));
     try {
-      const { result, warnings: newWarnings } = await rewriteReasons(workspace.raw, content, instructions, causeStatusEdited);
-      onChange(prev => {
-        if (!isResponseCurrent(prev, requestId)) return prev;
-        setOpStatus({ kind: 'succeeded', op: 'rewrite' });
-        setWarnings(newWarnings || []);
-        setTimeout(() => suggestionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' }), 50);
-        return applySuggestion(prev, result, requestId);
-      });
+      const { result, warnings: newWarnings } = await rewriteReasons(workspace.raw, content, undefined, causeStatusEdited);
+      if (!isResponseCurrent(workspaceRef.current, requestId)) return;
+      onChange(prev => applySuggestion(prev, result, requestId));
+      setOpStatus({ kind: 'succeeded', op: 'rewrite' });
+      setWarnings(newWarnings || []);
+      setTimeout(() => suggestionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' }), 50);
     } catch (err: any) {
       setOpStatus({ kind: 'failed', op: 'rewrite' });
       onChange(prev => failRequest(prev, requestId, err.message || 'Failed to rewrite reasons.'));
@@ -145,17 +157,28 @@ export default function ReasonsWorkspace({ workspace, onChange }: Props) {
   const handleAccept = () => {
     onChange(prev => acceptSuggestion(prev));
     setWarnings([]);
+    setEditMode(false);
   };
   const handleDismiss = () => {
     onChange(prev => dismissSuggestion(prev));
     setWarnings([]);
   };
-  const handleManualAccept = () => onChange(prev => manualAccept(prev, content));
+  const handleManualAccept = () => {
+    onChange(prev => manualAccept(prev, content));
+    setEditMode(false);
+  };
 
   const stale = isStale(workspace);
   const analyzeLabel = opStatus.kind === 'analyzing' ? 'Analyzing…' : 'Analyze';
   const rewriteLabel = opStatus.kind === 'rewriting' ? 'Rewriting…' : 'Rewrite with AI';
   const busy = workspace.loading;
+  // Reasons has no hard-required field in readiness.ts (it's optional for
+  // export) -- so the checkmark just tracks "is there any real content here"
+  // rather than a specific field, unlike Summary/Immediate Action.
+  const hasRealContent =
+    (!!narrative && (narrative.causeStatus !== 'unknown' || !!narrative.technicalBasis?.trim() || !!narrative.complianceBasis?.trim() || !!narrative.consequence?.trim())) ||
+    evidenceItems.some(e => !!e.component?.trim() || !!e.concern?.trim());
+  const showComponents = !!workspace.analysis.ranAt || hasRealContent;
 
   return (
     <div className="space-y-4">
@@ -167,6 +190,8 @@ export default function ReasonsWorkspace({ workspace, onChange }: Props) {
         {opStatus.kind === 'failed' && `Reasons ${opStatus.op} failed.`}
       </div>
 
+      {(!workspace.accepted || editMode) && (
+        <>
       <div>
         <label className="block text-sm font-semibold text-slate-700 mb-1">Raw Reasons Content</label>
         <textarea
@@ -176,7 +201,6 @@ export default function ReasonsWorkspace({ workspace, onChange }: Props) {
           placeholder="Paste rough reasons/evidence content here (this section is optional for some alert types)..."
         />
         <div className="flex gap-2 mt-2 items-center">
-          <input type="text" value={instructions} onChange={e => setInstructions(e.target.value)} placeholder="Optional rewrite instructions" className="flex-1 p-2 text-sm border border-slate-300 rounded-md" />
           <button onClick={handleAnalyze} disabled={busy || !workspace.raw.trim()} className="px-4 py-2 flex items-center gap-2 bg-slate-800 text-white rounded-md text-sm font-medium hover:bg-slate-700 disabled:opacity-50">
             {opStatus.kind === 'analyzing' && <Loader2 className="w-4 h-4 animate-spin" />}
             {analyzeLabel}
@@ -193,11 +217,10 @@ export default function ReasonsWorkspace({ workspace, onChange }: Props) {
         </div>
       )}
 
-      
-
+      {showComponents && (
       <div className="p-4 bg-amber-50 border border-amber-100 rounded-lg space-y-4">
           <h4 className="font-bold text-slate-800 flex items-center gap-2">
-            <CheckCircle2 className="w-5 h-5 text-emerald-600" /> Reasons Components
+            {hasRealContent && <CheckCircle2 className="w-5 h-5 text-emerald-600" />} Reasons Components
           </h4>
 
           {narrative ? (
@@ -222,7 +245,7 @@ export default function ReasonsWorkspace({ workspace, onChange }: Props) {
                 <span className="text-xs text-slate-400 ml-2">(AI cannot upgrade this toward "confirmed" without your edit)</span>
                 <FieldHint text={REASONS_FIELD_GUIDANCE.causeStatus.hint} />
               </div>
-              <Collapsible label="Advanced" defaultOpen={!!narrative.complianceBasis}>
+              <Collapsible label="Advanced">
                 <div>
                   <textarea value={narrative.complianceBasis || ''} onChange={e => updateNarrativeField('complianceBasis', e.target.value)} placeholder={REASONS_FIELD_GUIDANCE.complianceBasis.placeholder} className="w-full p-2 text-sm border rounded-md" rows={2} />
                   <FieldHint text={REASONS_FIELD_GUIDANCE.complianceBasis.hint} />
@@ -249,7 +272,7 @@ export default function ReasonsWorkspace({ workspace, onChange }: Props) {
                     <FieldHint text={REASONS_FIELD_GUIDANCE.evidenceConcern.hint} />
                   </div>
                 </div>
-                <Collapsible label="Advanced" defaultOpen={!!item.evidence}>
+                <Collapsible label="Advanced">
                   <div>
                     <input type="text" value={item.evidence || ''} onChange={e => updateEvidenceItem(item.id, { evidence: e.target.value || undefined })} placeholder={REASONS_FIELD_GUIDANCE.evidenceEvidence.placeholder} className="w-full p-1.5 border rounded text-sm" />
                     <FieldHint text={REASONS_FIELD_GUIDANCE.evidenceEvidence.hint} />
@@ -273,7 +296,7 @@ export default function ReasonsWorkspace({ workspace, onChange }: Props) {
             </button>
           </div>
         </div>
-      
+      )}
 
       {opStatus.kind === 'failed' && (
         <div className="p-3 bg-red-50 border border-red-200 rounded-lg text-sm text-red-800 flex items-start gap-2">
@@ -305,8 +328,10 @@ export default function ReasonsWorkspace({ workspace, onChange }: Props) {
           </div>
         </div>
       )}
+        </>
+      )}
 
-      {workspace.accepted && (
+      {workspace.accepted && !editMode && (
         <div className={`p-4 border rounded-lg ${stale ? 'bg-amber-50 border-amber-200' : 'bg-emerald-50 border-emerald-200'}`}>
           <h4 className={`font-bold mb-2 flex items-center gap-2 ${stale ? 'text-amber-900' : 'text-emerald-900'}`}>
             {stale && <AlertCircle className="w-4 h-4" />}
@@ -314,6 +339,9 @@ export default function ReasonsWorkspace({ workspace, onChange }: Props) {
             <span className="text-xs font-normal opacity-70">({workspace.accepted.source === 'ai' ? 'AI-assisted' : 'manually authored'})</span>
           </h4>
           <ReasonsContent value={workspace.accepted.value} />
+          <button onClick={() => setEditMode(true)} className="text-xs font-semibold text-slate-600 hover:text-slate-800 hover:underline mt-3">
+            Edit / Redraft
+          </button>
         </div>
       )}
     </div>
