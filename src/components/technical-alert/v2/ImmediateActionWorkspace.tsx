@@ -28,7 +28,15 @@ interface Props {
 
 const OBLIGATION_OPTIONS: ObligationStrength[] = ['mandatory', 'prohibited', 'conditional', 'advisory', 'unclear'];
 const CONTROL_TYPE_OPTIONS: ControlType[] = ['removal_from_service', 'red_tag', 'quarantine', 'escalation'];
-const EMPTY_CONTENT: ImmediateActionContent = { items: [], exceptions: [] };
+// Pre-seeded with one empty action item rather than starting fully empty, so
+// the section shows something ready to fill in immediately instead of
+// requiring "+ Add Action Item" first. Purely a display fallback -- read-only
+// until the user edits a field, at which point it becomes real committed
+// state under the same id (see updateItem below).
+const EMPTY_CONTENT: ImmediateActionContent = {
+  items: [{ id: 'default-item', actor: [], requiredAction: '', obligationStrength: 'mandatory' }],
+  exceptions: [],
+};
 
 function newActionItem(): ActionItem {
   return { id: crypto.randomUUID(), actor: [], requiredAction: '', obligationStrength: 'mandatory' };
@@ -43,11 +51,18 @@ type OpStatus =
   | { kind: 'failed'; op: 'analyze' | 'rewrite' };
 
 export default function ImmediateActionWorkspace({ workspace, onChange }: Props) {
-  const [instructions, setInstructions] = useState('');
+  // FCO-style reveal: see SummaryWorkspace.tsx for the full rationale.
+  const [editMode, setEditMode] = useState(false);
   const [opStatus, setOpStatus] = useState<OpStatus>({ kind: 'idle' });
   const [warnings, setWarnings] = useState<{ gate: string; message: string }[]>([]);
   const suggestionRef = useRef<HTMLDivElement>(null);
   const content = workspace.analysis.components ?? EMPTY_CONTENT;
+
+  // See SummaryWorkspace.tsx for the full rationale -- mirrors the latest
+  // `workspace` prop so handleAnalyze/handleRewrite can check staleness
+  // synchronously before calling onChange, instead of inside its updater.
+  const workspaceRef = useRef(workspace);
+  useEffect(() => { workspaceRef.current = workspace; }, [workspace]);
 
   useEffect(() => {
     if (opStatus.kind !== 'succeeded') return;
@@ -64,11 +79,9 @@ export default function ImmediateActionWorkspace({ workspace, onChange }: Props)
     onChange(prev => beginRequest(prev, requestId));
     try {
       const result = await analyzeImmediateAction(workspace.raw);
-      onChange(prev => {
-        if (!isResponseCurrent(prev, requestId)) return prev;
-        setOpStatus({ kind: 'succeeded', op: 'analyze' });
-        return applyAnalysisResult(prev, result, []);
-      });
+      if (!isResponseCurrent(workspaceRef.current, requestId)) return;
+      onChange(prev => applyAnalysisResult(prev, result, []));
+      setOpStatus({ kind: 'succeeded', op: 'analyze' });
     } catch (err: any) {
       setOpStatus({ kind: 'failed', op: 'analyze' });
       onChange(prev => failRequest(prev, requestId, err.message || 'Failed to analyze immediate action.'));
@@ -81,14 +94,12 @@ export default function ImmediateActionWorkspace({ workspace, onChange }: Props)
     setWarnings([]);
     onChange(prev => beginRequest(prev, requestId));
     try {
-      const { result, warnings: newWarnings } = await rewriteImmediateAction(workspace.raw, content, instructions);
-      onChange(prev => {
-        if (!isResponseCurrent(prev, requestId)) return prev;
-        setOpStatus({ kind: 'succeeded', op: 'rewrite' });
-        setWarnings(newWarnings || []);
-        setTimeout(() => suggestionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' }), 50);
-        return applySuggestion(prev, result, requestId);
-      });
+      const { result, warnings: newWarnings } = await rewriteImmediateAction(workspace.raw, content);
+      if (!isResponseCurrent(workspaceRef.current, requestId)) return;
+      onChange(prev => applySuggestion(prev, result, requestId));
+      setOpStatus({ kind: 'succeeded', op: 'rewrite' });
+      setWarnings(newWarnings || []);
+      setTimeout(() => suggestionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' }), 50);
     } catch (err: any) {
       setOpStatus({ kind: 'failed', op: 'rewrite' });
       onChange(prev => failRequest(prev, requestId, err.message || 'Failed to rewrite immediate action.'));
@@ -98,12 +109,16 @@ export default function ImmediateActionWorkspace({ workspace, onChange }: Props)
   const handleAccept = () => {
     onChange(prev => acceptSuggestion(prev));
     setWarnings([]);
+    setEditMode(false);
   };
   const handleDismiss = () => {
     onChange(prev => dismissSuggestion(prev));
     setWarnings([]);
   };
-  const handleManualAccept = () => onChange(prev => manualAccept(prev, content));
+  const handleManualAccept = () => {
+    onChange(prev => manualAccept(prev, content));
+    setEditMode(false);
+  };
 
   // --- item editing (operates on whichever content is currently being edited:
   // analysis.components, pre-accept) ---
@@ -150,6 +165,9 @@ export default function ImmediateActionWorkspace({ workspace, onChange }: Props)
   const analyzeLabel = opStatus.kind === 'analyzing' ? 'Analyzing…' : 'Analyze';
   const rewriteLabel = opStatus.kind === 'rewriting' ? 'Rewriting…' : 'Rewrite with AI';
   const busy = workspace.loading;
+  // Mirrors readiness.ts's own blocking check for Immediate Action.
+  const hasRequiredContent = content.items.some(i => !!i.requiredAction?.trim());
+  const showComponents = !!workspace.analysis.ranAt || hasRequiredContent;
 
   return (
     <div className="space-y-4">
@@ -161,6 +179,8 @@ export default function ImmediateActionWorkspace({ workspace, onChange }: Props)
         {opStatus.kind === 'failed' && `Immediate action ${opStatus.op} failed.`}
       </div>
 
+      {(!workspace.accepted || editMode) && (
+        <>
       <div>
         <label className="block text-sm font-semibold text-slate-700 mb-1">Raw Immediate Action Content</label>
         <textarea
@@ -170,13 +190,6 @@ export default function ImmediateActionWorkspace({ workspace, onChange }: Props)
           placeholder="Paste rough immediate-action instructions here..."
         />
         <div className="flex gap-2 mt-2 items-center">
-          <input
-            type="text"
-            value={instructions}
-            onChange={e => setInstructions(e.target.value)}
-            placeholder="Optional rewrite instructions"
-            className="flex-1 p-2 text-sm border border-slate-300 rounded-md"
-          />
           <button
             onClick={handleAnalyze}
             disabled={busy || !workspace.raw.trim()}
@@ -198,11 +211,10 @@ export default function ImmediateActionWorkspace({ workspace, onChange }: Props)
         </div>
       )}
 
-      
-
+      {showComponents && (
       <div className="p-4 bg-amber-50 border border-amber-100 rounded-lg space-y-4">
           <h4 className="font-bold text-slate-800 flex items-center gap-2">
-            <CheckCircle2 className="w-5 h-5 text-emerald-600" /> Action Items
+            {hasRequiredContent && <CheckCircle2 className="w-5 h-5 text-emerald-600" />} Action Items
           </h4>
           <div className="space-y-3">
             {content.items.map(item => (
@@ -244,7 +256,6 @@ export default function ImmediateActionWorkspace({ workspace, onChange }: Props)
 
                 <Collapsible
                   label="Advanced (target, timing, control type, exception link)"
-                  defaultOpen={!!(item.target || item.timing || (item.controlType && item.controlType.length > 0) || item.exceptionRef)}
                 >
                   <div className="grid grid-cols-2 gap-2">
                     <div>
@@ -350,7 +361,7 @@ export default function ImmediateActionWorkspace({ workspace, onChange }: Props)
                   />
                   <FieldHint text={ACTION_FIELD_GUIDANCE.exceptionApprovers.hint} />
                 </div>
-                <Collapsible label="Advanced (submission system, related standard)" defaultOpen={!!(exc.submissionSystem || exc.relatedStandard)}>
+                <Collapsible label="Advanced (submission system, related standard)">
                   <div className="grid grid-cols-2 gap-2">
                     <input
                       type="text"
@@ -393,7 +404,7 @@ export default function ImmediateActionWorkspace({ workspace, onChange }: Props)
             </button>
           </div>
         </div>
-      
+      )}
 
       {opStatus.kind === 'failed' && (
         <div className="p-3 bg-red-50 border border-red-200 rounded-lg text-sm text-red-800 flex items-start gap-2">
@@ -441,8 +452,10 @@ export default function ImmediateActionWorkspace({ workspace, onChange }: Props)
           </div>
         </div>
       )}
+        </>
+      )}
 
-      {workspace.accepted && (
+      {workspace.accepted && !editMode && (
         <div className={`p-4 border rounded-lg ${stale ? 'bg-amber-50 border-amber-200' : 'bg-emerald-50 border-emerald-200'}`}>
           <h4 className={`font-bold mb-2 flex items-center gap-2 ${stale ? 'text-amber-900' : 'text-emerald-900'}`}>
             {stale && <AlertCircle className="w-4 h-4" />}
@@ -456,6 +469,9 @@ export default function ImmediateActionWorkspace({ workspace, onChange }: Props)
               </li>
             ))}
           </ul>
+          <button onClick={() => setEditMode(true)} className="text-xs font-semibold text-slate-600 hover:text-slate-800 hover:underline mt-3">
+            Edit / Redraft
+          </button>
         </div>
       )}
     </div>

@@ -45,9 +45,20 @@ export interface SectionWorkspace<TComponents, TAccepted> {
     source: "ai" | "manual";
     basedOn: RevisionRef;
     acceptedAt: string;
+    // Summary-only: a snapshot (JSON-stringified per neighbor section id, or
+    // null if that neighbor wasn't accepted) of the neighbor sections' values
+    // as of the rewrite call that produced this accepted content, when it was
+    // AI-generated using them as read-only synthesis grounding (locked
+    // decision #5). Lets staleness be detected if a neighbor is later
+    // re-accepted with different content (RC7, 2026-08-06) -- undefined for
+    // every other section, and for manually-authored Summary content.
+    groundedOnNeighbors?: Record<string, string | null>;
   } | null;
   freshness: "fresh" | "stale";
   staleDueToControlChange: boolean;
+  // Distinct from staleDueToControlChange: set when a neighbor section this
+  // content was AI-grounded on changes after acceptance (RC7, 2026-08-06).
+  staleDueToNeighborChange: boolean;
   currentRevision: RevisionRef;
   // Set when an analyze/rewrite request is *issued* (before any response has
   // landed), so a response can be checked for staleness against the revision
@@ -291,6 +302,7 @@ export interface SectionAcceptedView<T> {
   accepted: { value: T } | null;
   freshness: 'fresh' | 'stale';
   staleDueToControlChange: boolean;
+  staleDueToNeighborChange: boolean;
 }
 export interface AcceptedSectionsView {
   summary: SectionAcceptedView<SummaryAccepted>;
