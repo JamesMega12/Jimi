@@ -56,9 +56,17 @@ export interface SectionWorkspace<TComponents, TAccepted> {
   } | null;
   freshness: "fresh" | "stale";
   staleDueToControlChange: boolean;
+  // Provenance for staleDueToControlChange: which Control-Info field(s) actually
+  // changed, so the UI can name them ("the deadline changed") instead of a
+  // generic "a field changed". Cleared alongside the flag on re-accept.
+  staleControlFields?: ControlInfoField[];
   // Distinct from staleDueToControlChange: set when a neighbor section this
   // content was AI-grounded on changes after acceptance (RC7, 2026-08-06).
   staleDueToNeighborChange: boolean;
+  // Provenance for staleDueToNeighborChange: which neighbor section(s) changed,
+  // so the UI can name them ("the Reasons section changed") rather than "a
+  // section it was drafted from". Cleared alongside the flag on re-accept.
+  staleNeighborSections?: SectionId[];
   currentRevision: RevisionRef;
   // Set when an analyze/rewrite request is *issued* (before any response has
   // landed), so a response can be checked for staleness against the revision
@@ -302,7 +310,9 @@ export interface SectionAcceptedView<T> {
   accepted: { value: T } | null;
   freshness: 'fresh' | 'stale';
   staleDueToControlChange: boolean;
+  staleControlFields?: ControlInfoField[];
   staleDueToNeighborChange: boolean;
+  staleNeighborSections?: SectionId[];
 }
 export interface AcceptedSectionsView {
   summary: SectionAcceptedView<SummaryAccepted>;

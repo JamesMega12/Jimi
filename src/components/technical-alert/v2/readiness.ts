@@ -7,6 +7,8 @@ import {
   SectionAcceptedView,
 } from './types';
 import { runDeterministicCrossSectionChecks } from './crossSectionReview';
+import { staleReasons } from './sectionWorkspace';
+import { describeStaleReasons } from './staleReasonCopy';
 
 // Deterministic (non-AI) readiness gate for the v2 draft -- extends the proven
 // Phase D pattern (computeTechnicalAlertReadiness in the v1 backend) to the
@@ -26,9 +28,6 @@ export interface ReadinessInput {
   sections: AcceptedSectionsView;
 }
 
-function isStaleView(v: SectionAcceptedView<unknown>): boolean {
-  return v.freshness === 'stale' || v.staleDueToControlChange || v.staleDueToNeighborChange;
-}
 
 export function computeTechnicalAlertReadinessV2(input: ReadinessInput): Readiness {
   const blockingIssues: string[] = [];
@@ -66,10 +65,28 @@ export function computeTechnicalAlertReadinessV2(input: ReadinessInput): Readine
     }
   }
 
+  // Staleness is split by cause. self-edit and control-change mean the accepted
+  // content may literally be wrong (you edited it, or a field it prints
+  // changed), so they BLOCK export. neighbor-change is a softer "a section this
+  // Summary was synthesized from changed -- you may want to re-confirm" signal
+  // that does NOT check for any actual contradiction (cross-section review owns
+  // that), so it is a non-blocking WARNING and never gates export. A section
+  // that is also blocking-stale is already told to re-accept (which clears
+  // everything), so it isn't additionally warned.
   ([['summary', summary], ['reasons', reasons], ['immediateAction', immediateAction], ['followUpAction', followUpAction]] as const).forEach(
     ([name, view]) => {
-      if (view.accepted && isStaleView(view)) {
-        blockingIssues.push(`${name === 'immediateAction' ? 'Immediate Action' : name === 'followUpAction' ? 'Follow-Up Action' : name[0].toUpperCase() + name.slice(1)} is accepted but stale -- review and re-accept before export.`);
+      if (!view.accepted) return;
+      const label = name === 'immediateAction' ? 'Immediate Action' : name === 'followUpAction' ? 'Follow-Up Action' : name[0].toUpperCase() + name.slice(1);
+      const codes = staleReasons(view);
+      const hasBlockingStale = codes.includes('self-edit') || codes.includes('control-change');
+      const hasNeighborStale = codes.includes('neighbor-change');
+      if (hasBlockingStale) {
+        // Describe only the blocking causes here (neighbor-change is warning-only).
+        const blockingClauses = describeStaleReasons({ ...view, staleDueToNeighborChange: false, staleNeighborSections: undefined });
+        blockingIssues.push(`${label} is accepted but needs another look (${blockingClauses.join('; ')}) -- re-accept before export.`);
+      } else if (hasNeighborStale) {
+        const neighborClause = describeStaleReasons({ freshness: 'fresh', staleDueToControlChange: false, staleDueToNeighborChange: true, staleNeighborSections: view.staleNeighborSections })[0];
+        warnings.push(`${label} may be out of date: ${neighborClause} -- re-confirm and re-accept it if needed (optional; does not block export).`);
       }
     }
   );

@@ -14,6 +14,8 @@ import {
   ControlInformation,
   SupportingContent,
   ActionItem,
+  ControlInfoField,
+  SectionId,
 } from './src/components/technical-alert/v2/types';
 
 let failures = 0;
@@ -26,11 +28,14 @@ function assert(condition: boolean, label: string) {
   }
 }
 
-function acceptedWs<T>(value: T, opts?: { stale?: boolean; staleDueToControlChange?: boolean }) {
+function acceptedWs<T>(value: T, opts?: { stale?: boolean; staleDueToControlChange?: boolean; staleControlFields?: ControlInfoField[]; staleDueToNeighborChange?: boolean; staleNeighborSections?: SectionId[] }) {
   const ws = createEmptySectionWorkspace<T, T>();
   ws.accepted = { value, source: 'manual', basedOn: ws.currentRevision, acceptedAt: new Date().toISOString() };
   if (opts?.stale) ws.freshness = 'stale';
   if (opts?.staleDueToControlChange) ws.staleDueToControlChange = true;
+  if (opts?.staleControlFields) ws.staleControlFields = opts.staleControlFields;
+  if (opts?.staleDueToNeighborChange) ws.staleDueToNeighborChange = true;
+  if (opts?.staleNeighborSections) ws.staleNeighborSections = opts.staleNeighborSections;
   return ws;
 }
 function emptyWs<T>() {
@@ -91,18 +96,50 @@ function baseInput(overrides: Partial<ReadinessInput> = {}): ReadinessInput {
   assert(r.status === 'Blocked' && r.blockingIssues.some(b => b.includes('Immediate Action')), 'blocking: immediateAction with zero items (no N/A escape hatch)');
 }
 
-// ===== Blocking: stale accepted content (either cause) =====
+// ===== Blocking: stale accepted content (each cause), with reason-specific text =====
+// The blocking line now names *why* (not a generic "stale") -- see readiness.ts
+// reusing staleReasons()/describeStaleReasons().
 {
   const sections = fullyReadySections();
   sections.reasons = acceptedWs<ReasonsAccepted>({ narrative: { technicalBasis: 'x', causeStatus: 'confirmed' } }, { stale: true });
   const r = computeTechnicalAlertReadinessV2(baseInput({ sections }));
-  assert(r.status === 'Blocked' && r.blockingIssues.some(b => b.toLowerCase().includes('stale')), 'blocking: stale accepted content (raw-edit cause) blocks readiness');
+  assert(r.status === 'Blocked' && r.blockingIssues.some(b => b.includes('needs another look') && b.includes('you edited this section after accepting it')), 'blocking: stale accepted content (self-edit cause) blocks readiness with specific reason');
 }
 {
   const sections = fullyReadySections();
-  sections.summary = acceptedWs<SummaryAccepted>({ subject: 's', affectedScope: 'a' }, { staleDueToControlChange: true });
+  sections.summary = acceptedWs<SummaryAccepted>({ subject: 's', affectedScope: 'a' }, { staleDueToControlChange: true, staleControlFields: ['deadline'] });
   const r = computeTechnicalAlertReadinessV2(baseInput({ sections }));
-  assert(r.status === 'Blocked' && r.blockingIssues.some(b => b.toLowerCase().includes('stale')), 'blocking: stale accepted content (control-change cause) also blocks readiness');
+  assert(r.status === 'Blocked' && r.blockingIssues.some(b => b.includes('needs another look') && b.includes('the deadline changed after you accepted this section')), 'blocking: control-change cause names the exact field (deadline) in readiness');
+}
+// Neighbor-change alone is a NON-blocking WARNING (not a blocker) -- it never
+// gates export and names the exact section that changed.
+{
+  const sections = fullyReadySections();
+  sections.summary = acceptedWs<SummaryAccepted>({ subject: 's', affectedScope: 'a' }, { staleDueToNeighborChange: true, staleNeighborSections: ['reasons'] });
+  const r = computeTechnicalAlertReadinessV2(baseInput({ sections }));
+  assert(
+    r.status !== 'Blocked'
+      && !r.blockingIssues.some(b => b.includes('the Reasons section changed'))
+      && r.warnings.some(w => w.includes('the Reasons section changed after this summary was written from it')),
+    'neighbor-change alone is a warning, not a blocker, and names the exact section (Reasons)',
+  );
+}
+// A section that is BOTH blocking-stale and neighbor-stale is blocked, and the
+// blocking line lists only the blocking causes (neighbor-change is masked out,
+// not double-reported).
+{
+  const sections = fullyReadySections();
+  sections.summary = acceptedWs<SummaryAccepted>({ subject: 's', affectedScope: 'a' }, { stale: true, staleDueToControlChange: true, staleControlFields: ['deadline'], staleDueToNeighborChange: true, staleNeighborSections: ['reasons'] });
+  const r = computeTechnicalAlertReadinessV2(baseInput({ sections }));
+  const line = r.blockingIssues.find(b => b.includes('needs another look'));
+  assert(
+    !!line
+      && line.includes('you edited this section after accepting it')
+      && line.includes('the deadline changed')
+      && !line.includes('written from it')
+      && !r.warnings.some(w => w.includes('written from it')),
+    'blocking line lists only blocking causes; neighbor-change is masked out and not double-warned',
+  );
 }
 
 // ===== Blocking: dangling exceptionRef =====

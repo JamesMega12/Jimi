@@ -15,7 +15,7 @@ import {
   failRequest,
 } from './sectionWorkspace';
 import { analyzeFollowUpAction, rewriteFollowUpAction } from '../../../services/technicalAlertApiV2';
-import { FieldHint, Collapsible } from './SectionHelpers';
+import { FieldHint, Collapsible, StaleExplanation } from './SectionHelpers';
 import { FOLLOW_UP_FIELD_GUIDANCE, ACTION_FIELD_GUIDANCE } from './guidance';
 
 type Workspace = SectionWorkspace<FollowUpActionContent, FollowUpActionContent>;
@@ -289,9 +289,10 @@ export default function FollowUpActionWorkspace({ workspace, onChange }: Props) 
         <div className={`p-4 border rounded-lg ${stale ? 'bg-amber-50 border-amber-200' : 'bg-emerald-50 border-emerald-200'}`}>
           <h4 className={`font-bold mb-2 flex items-center gap-2 ${stale ? 'text-amber-900' : 'text-emerald-900'}`}>
             {stale && <AlertCircle className="w-4 h-4" />}
-            {stale ? 'Accepted (stale — review before export)' : 'Accepted'}
+            {stale ? 'Accepted — needs another review' : 'Accepted'}
             <span className="text-xs font-normal opacity-70">({workspace.accepted.source === 'ai' ? 'AI-assisted' : 'manually authored'})</span>
           </h4>
+          {stale && <StaleExplanation ws={workspace} />}
           {workspace.accepted.value.notApplicable ? (
             <p className="text-sm italic">Marked Not Applicable.</p>
           ) : (

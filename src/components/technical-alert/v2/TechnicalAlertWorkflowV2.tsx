@@ -15,7 +15,8 @@ import {
   SupportingContent,
   Finding,
 } from './types';
-import { computeDependentSectionsFromControlInfoChange } from './controlInfoDependency';
+import { computeControlChangeImpact } from './controlInfoDependency';
+import { computeChangedGroundedNeighbors } from './summaryGrounding';
 import ImmediateActionWorkspace from './ImmediateActionWorkspace';
 import SummaryWorkspace from './SummaryWorkspace';
 import ReasonsWorkspace from './ReasonsWorkspace';
@@ -157,9 +158,9 @@ export default function TechnicalAlertWorkflowV2() {
       immediateAction: sections.immediateAction.accepted ? JSON.stringify(sections.immediateAction.accepted.value) : null,
       followUpAction: sections.followUpAction.accepted ? JSON.stringify(sections.followUpAction.accepted.value) : null,
     };
-    const changed = Object.keys(current).some(k => current[k] !== (grounded[k] ?? null));
-    if (changed) {
-      setSections(prev => ({ ...prev, summary: markStaleDueToNeighborChange(prev.summary) }));
+    const changedSections = computeChangedGroundedNeighbors(grounded, current);
+    if (changedSections.length > 0) {
+      setSections(prev => ({ ...prev, summary: markStaleDueToNeighborChange(prev.summary, changedSections) }));
     }
   }, [sections.reasons.accepted, sections.immediateAction.accepted, sections.followUpAction.accepted, sections.summary.accepted, sections.summary.staleDueToNeighborChange]);
 
@@ -189,12 +190,12 @@ export default function TechnicalAlertWorkflowV2() {
   // mark exactly the listed dependent sections' accepted content stale (a
   // distinct cause from a raw/component edit -- see CONTROL_INFO_DEPENDENTS).
   const setControlInformation = (next: ControlInformation) => {
-    const dependentSections = computeDependentSectionsFromControlInfoChange(controlInformation, next);
-    if (dependentSections.size > 0) {
+    const impact = computeControlChangeImpact(controlInformation, next);
+    if (impact.size > 0) {
       setSections(prev => {
         const updated = { ...prev };
-        dependentSections.forEach(id => {
-          (updated as any)[id] = markStaleDueToControlChange(prev[id] as any);
+        impact.forEach((fields, id) => {
+          (updated as any)[id] = markStaleDueToControlChange(prev[id] as any, fields);
         });
         return updated;
       });

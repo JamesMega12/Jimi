@@ -1,5 +1,6 @@
 import React from 'react';
 import { ChevronDown, Sparkles, PenLine } from 'lucide-react';
+import { StalenessDescribable, describeStaleReasons } from './staleReasonCopy';
 
 // Small, domain-neutral presentational primitives shared by the four section
 // workspaces (Summary/Reasons/ImmediateAction/FollowUpAction). No AI calls or
@@ -8,6 +9,44 @@ import { ChevronDown, Sparkles, PenLine } from 'lucide-react';
 export function FieldHint({ text }: { text?: string }) {
   if (!text) return null;
   return <p className="text-xs text-slate-500 mt-0.5">{text}</p>;
+}
+
+// Explains *why* an accepted section went stale, in one place shared by all four
+// accepted cards (they otherwise duplicate the card verbatim). Renders nothing
+// when fresh. Three parts: the specific reason(s) (naming the exact field/
+// section that changed, via describeStaleReasons), what to do, and a
+// reassurance that this is a normal re-confirm -- not an error, and not a
+// requirement to change anything (re-acceptance clears staleness
+// unconditionally under the trust-the-reviewer model).
+function capitalize(s: string): string {
+  return s.charAt(0).toUpperCase() + s.slice(1);
+}
+export function StaleExplanation({ ws }: { ws: StalenessDescribable }) {
+  const reasons = describeStaleReasons(ws);
+  if (reasons.length === 0) return null;
+  return (
+    <div className="text-xs text-amber-800 mt-1 mb-2 space-y-1">
+      {reasons.length === 1 ? (
+        <p>This section needs another look because {reasons[0]}.</p>
+      ) : (
+        <>
+          <p>This section needs another look because:</p>
+          <ul className="list-disc pl-5">
+            {reasons.map((r, i) => <li key={i}>{capitalize(r)}.</li>)}
+          </ul>
+        </>
+      )}
+      <p>
+        <span className="font-semibold">What to do:</span> click &ldquo;Edit / Redraft&rdquo; below,
+        check that the accepted content still matches, then re-accept it.
+      </p>
+      <p className="text-amber-700">
+        This is normal whenever related details change after you accept &mdash; it&rsquo;s a prompt to
+        re-confirm, not an error. If the content still reads correctly you can re-accept it as-is;
+        nothing has to change.
+      </p>
+    </div>
+  );
 }
 
 interface EmptySectionStartProps {
