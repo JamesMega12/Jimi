@@ -1,6 +1,6 @@
 {
-  "name": "techalert announcement agent",
-  "description": "Rewrite Field Change Order (FCO) draft content into a clearer, safer, operator-friendly format for TechCom review.",
+  "name": "Jimi",
+  "description": "Jimi drafts and reviews Field Change Orders, Technical Alerts, and Announcements -- rewriting rough source content into clearer, safer, operator-friendly documents with AI-assisted drafting, deterministic readiness checks, and DOCX export.",
   "requestFramePermissions": [],
   "majorCapabilities": [
     "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"

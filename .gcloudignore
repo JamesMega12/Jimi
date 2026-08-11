@@ -1,0 +1,20 @@
+# Controls what gets uploaded to Cloud Build when deploying via
+# `gcloud run deploy --source .` (the same path AI Studio's "Deploy to Cloud
+# Run" button uses). Mirrors .gitignore, plus dev-only tooling that has no
+# business in a build/runtime image.
+
+.git/
+.gitignore
+
+node_modules/
+build/
+dist/
+coverage/
+.DS_Store
+*.log
+.env*
+!.env.example
+
+.claude/
+.vscode/
+*.pid
