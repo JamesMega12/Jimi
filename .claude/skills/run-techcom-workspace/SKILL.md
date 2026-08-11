@@ -1,9 +1,9 @@
 ---
 name: run-techcom-workspace
-description: Build, run, and drive TechCom Document Workspace (FCO Draft Assistant + TechCom Announcement App) — a Vite/React + Express/tsx app on port 3000 driven by Gemini. Use when asked to start the app, run it locally, take a screenshot of the FCO or TechCom workflow, or click-through-verify a UI change in either workflow.
+description: Build, run, and drive the Jimi app (formerly TechCom Document Workspace) — a Vite/React + Express/tsx SPA on port 3000, driven by Gemini, with three workflows: FCO Agent, Technical Alert, and Announcement. Use when asked to start or run the app locally, take a screenshot, or click-through-verify a UI change in the FCO, Technical Alert, or Announcement workflow.
 ---
 
-TechCom Document Workspace is a single Express server (`server.ts`, run via `tsx`) that hosts Vite in middleware mode and serves one React SPA with two workflows: **FCO Draft Assistant** and **TechCom Announcement App**. There is no separate frontend/backend process — one `npm run dev` starts everything on `http://localhost:3000`. Drive it via `.claude/skills/run-techcom-workspace/driver.mjs`, a small Playwright-backed REPL (this project has no `chromium-cli` binary available, so this driver fills that role).
+The app is branded **Jimi** in the UI (formerly "TechCom Document Workspace"). It's a single Express server (`server.ts`, run via `tsx`) that hosts Vite in middleware mode and serves one React SPA with **three** workflows, shown as cards on a "Select a Workflow" landing page and in the top nav: **FCO Agent**, **Technical Alert**, and **Announcement**. There is no separate frontend/backend process — one `npm run dev` starts everything on `http://localhost:3000`. Drive it via `.claude/skills/run-techcom-workspace/driver.mjs`, a small Playwright-backed REPL (this project has no `chromium-cli` binary available, so this driver fills that role).
 
 All paths below are relative to the repo root (`<unit>/`).
 
@@ -53,39 +53,73 @@ Server running on port 3000
 
 2. Pipe commands to the driver. Screenshots land in `.claude/skills/run-techcom-workspace/screenshots/`.
 
+**Smoke (no AI — fast, deterministic).** Reach the Technical Alert workflow and screenshot it:
+
 ```bash
 cd .claude/skills/run-techcom-workspace
 node driver.mjs <<'EOF'
 nav http://localhost:3000
 wait-for text=Select a Workflow
 screenshot 01-landing
-click text=FCO Draft Assistant
-wait-for text=Start Draft
-click role=button:Load FCO Sample
-wait-for role=button:Suggest Title
-screenshot 02-sample-loaded
-click role=button:Suggest Title
-wait-for text=Suggested Titles
-screenshot 03-title-suggestions
+click text=Technical Alert
+wait-for role=button:Load Technical Alert Sample
+screenshot 02-technical-alert
 console
 quit
 EOF
 cd ../../..
 ```
 
-Verified output of exactly this script, this session:
+Verified output of exactly this script, this session (Windows; dev server already up):
 ```
 [driver] navigated to http://localhost:3000
 [driver] found: text=Select a Workflow
 [driver] screenshot -> .../screenshots/01-landing.png
-[driver] clicked: text=FCO Draft Assistant
-[driver] found: text=Start Draft
-[driver] clicked: role=button:Load FCO Sample
-[driver] found: role=button:Suggest Title
-[driver] screenshot -> .../screenshots/02-sample-loaded.png
-[driver] clicked: role=button:Suggest Title
-[driver] found: text=Suggested Titles
-[driver] screenshot -> .../screenshots/03-title-suggestions.png
+[driver] clicked: text=Technical Alert
+[driver] found: role=button:Load Technical Alert Sample
+[driver] screenshot -> .../screenshots/02-technical-alert.png
+[driver] console errors (0):
+[driver] dialogs seen (0): []
+```
+
+**Driving an AI step (Analyze / Rewrite / Suggest Title).** These call Gemini and are slow (~up to 100s, can 502/time out), so give the AI `wait-for` a high timeout and run the whole driver in the **background**, reading its output file — don't block a foreground call that may exceed a 2-minute cap. This exact flow (load sample → Analyze the Summary → accept it with **Mark Ready** (no AI) → change the deadline to flip it stale) produced this session's staleness screenshots:
+
+```bash
+cd .claude/skills/run-techcom-workspace
+node driver.mjs <<'EOF'
+nav http://localhost:3000
+wait-for text=Select a Workflow
+click text=Technical Alert
+wait-for role=button:Load Technical Alert Sample
+click role=button:Load Technical Alert Sample
+wait-for role=button:Summary
+click role=button:Summary
+wait-for role=button:Analyze
+click role=button:Analyze
+wait-for text=Summary Components 150000
+click role=button:Mark Ready
+wait-for text=Accepted 30000
+click role=button:Control Information
+wait-for text=Deadline
+fill css=input[type=date] 2027-03-15
+wait-for text=needs another look 30000
+screenshot 03-stale-control-change
+console
+quit
+EOF
+cd ../../..
+```
+
+Verified tail of this run, this session:
+```
+[driver] found: text=Summary Components
+[driver] clicked: role=button:Mark Ready
+[driver] found: text=Accepted
+[driver] clicked: role=button:Control Information
+[driver] found: text=Deadline
+[driver] filled: css=input[type=date] = "2027-03-15"
+[driver] found: text=needs another look
+[driver] screenshot -> .../screenshots/03-stale-control-change.png
 [driver] console errors (0):
 [driver] dialogs seen (0): []
 ```
@@ -122,17 +156,25 @@ Otherwise the next `npm run dev` hits `EADDRINUSE` on port 3000. (On Linux/macOS
 npm run dev   # → serves http://localhost:3000. Ctrl-C to stop.
 ```
 
-Open `http://localhost:3000` in a browser; you land on a "Select a Workflow" screen — pick **FCO Draft Assistant** or **TechCom Announcement App**.
+Open `http://localhost:3000` in a browser; you land on a "Select a Workflow" screen (branded **Jimi**) — pick **FCO Agent**, **Technical Alert**, or **Announcement**.
 
 ## Test
 
-No automated test runner is wired into `package.json` (no `test` script). The repo has many standalone root-level `test-*.ts`/`test_*.ts` scripts (e.g. `test-fco-split-routes.ts`, `run_tests.ts`) that are run directly with `tsx <file>.ts` against a running dev server — not exercised as part of this skill; see those files individually if a task needs them.
+- **Type-check:** `npm run lint` (runs `tsc --noEmit`). Fast; run it after each logical edit.
+- **Unit tests:** `npm test` (runs `test-runner.mjs`, which globs the pure `test-announcement-*.ts`, `test-technical-alert-v2-*.ts`, `test-fco-unit-*.ts`, and `test-ai-timeout.ts` scripts and runs each via `tsx`). No dev server needed for these. Any single one also runs standalone: `npx tsx <file>.ts`.
+- **Known-failing baseline (this session):** `test-technical-alert-v2-cutover-migration.ts` fails on a clean checkout too (a localStorage-key assertion) — **unrelated to your change**; the suite is otherwise green.
+- Other root-level `test-*.ts` (e.g. `test-fco-split-routes.ts`) run against a live dev server via `tsx <file>.ts` and are not part of `npm test`.
 
 ---
 
 ## Gotchas
 
-- **The app is not the FCO/TechCom workflow directly.** Navigating to `http://localhost:3000` lands on a "Select a Workflow" chooser page first (`TechCom Document Workspace` header, two cards). You must `click text=FCO Draft Assistant` (or `TechCom Announcement App`) before any workflow-specific selector will exist. Waiting for `text=Start Draft` (FCO) or the TechCom equivalent right after `nav` will just time out.
+- **The app does not open a workflow directly.** Navigating to `http://localhost:3000` lands on a "Select a Workflow" chooser first (branded **Jimi**, **three** cards: **FCO Agent / Technical Alert / Announcement**). You must `click text=<workflow>` (e.g. `click text=Technical Alert`) before any workflow-specific selector exists; waiting for a workflow-internal element right after `nav` just times out. **The names changed with the "Jimi" rename** — the cards are now "FCO Agent" (not "FCO Draft Assistant") and "Announcement" (not "TechCom Announcement App"), so older selectors like `text=FCO Draft Assistant` no longer match.
+- **Use `role=button:<name>`, not `text=`, for section headers/buttons.** `text=Summary` matches a *hidden* progress label ("Summary & Title") and the driver hangs waiting for it to become visible; `role=button:Summary` hits the real accordion header. (Verified this session.)
+- **Parentheses break `role=…:<name>` (the name is a regex).** Use `role=button:Mark Ready`, not `role=button:Mark Ready (No AI)`.
+- **AI steps (Analyze / Rewrite / Suggest Title / Deep Check) are slow** — a Gemini round trip is ~up to 100s and can 502/time out. Give the AI `wait-for` a high timeout (e.g. `wait-for text=Summary Components 150000`) and run the whole driver in the **background**, reading its output file, rather than blocking a foreground call that may exceed a 2-minute cap.
+- **Collapsed accordion sections don't render their children** (`{isOpen && …}` in `common/Accordion.tsx`). A button inside a collapsed section isn't in the DOM — expand the section first (this also keeps `role=button:Analyze` unambiguous when only one section is open).
+- **Fast, no-AI state setup:** to get a Technical Alert section into an accepted state without a Gemini call, use **Mark Ready** (manual accept) or, for Follow-Up Action, **Accept as Not Applicable** — handy for quickly reaching downstream UI like staleness/readiness cards.
 - **No `chromium-cli` binary exists in this environment/project** — `driver.mjs` + a scoped Playwright install is the substitute. Keep Playwright installed *inside this skill directory* (`.claude/skills/run-techcom-workspace/node_modules`), not the repo root, so driving the app never touches the app's own dependency tree.
 - **Suggest/Generate Title button (`Step1Context.tsx`) previously threw silently.** Historically `onClick={handleSuggestTitle}` passed the raw React click event into a function expecting a string, which crashed `JSON.stringify` on the circular event object and surfaced only as a swallowed `alert()` — invisible to anything not watching dialogs. The `console` driver command's dialog tracking exists specifically to catch this class of bug: if a click silently pops a JS `alert`, `console` will show it in the `dialogs seen` list even though nothing crashes the page.
 - **`Load FCO Sample` can trigger a `window.confirm`** if the draft already has content (`Step1Context.tsx` `handleLoadSampleClick`). On a fresh page load this doesn't fire (no existing content), which is what the verified script above relies on — the driver auto-accepts any dialog that does appear, so this is safe either way, but don't be surprised if `console` reports a dialog on a second `Load FCO Sample` click in the same session.
