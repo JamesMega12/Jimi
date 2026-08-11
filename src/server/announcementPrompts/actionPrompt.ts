@@ -40,6 +40,15 @@ Also capture an optional "lead": a single overview sentence if the source opens
 the Action with one before the itemized actions. Preserve exact identifiers
 (part numbers, InTouch IDs, question numbers) verbatim.
 
+FORMATTING
+If one item itself has its own sub-steps or sub-list in the source (e.g. a
+numbered requirement followed by several indented sub-bullets), keep those AS
+PART OF that one item's "text" using lines starting with "- " for each
+sub-step -- do not split them into separate top-level items. If the source
+uses meaningful emphasis (bold/italic) or a hyperlink on a term within an
+item, preserve it using **bold**, *italic*, [link text](url). Never invent
+structure, emphasis, or a link the source doesn't have.
+
 OUTPUT SCHEMA
 Return JSON matching exactly: { "lead"?: string, "items": [ { "kind", "text", "deadline"?, "responsibleRole"?, "reference"? } ] }
 `;
@@ -65,6 +74,10 @@ operator-friendly, imperative language -- but DO NOT change the structure:
 
 Do not flatten the list into one dense paragraph -- the itemized structure is
 intentional. This is publication-ready operator guidance; keep it precise.
+
+FORMATTING: preserve any "- " sub-step lines and any **bold**/*italic*/
+[link text](url) markup already present in a reviewed item's text; never
+invent new structure, emphasis, or a link.
 
 OUTPUT SCHEMA
 Return JSON matching exactly: { "lead"?: string, "items": [ { "id", "kind", "text", "deadline"?, "responsibleRole"?, "reference"? } ] }

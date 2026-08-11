@@ -15,6 +15,7 @@ import {
   dismissSuggestion,
   isResponseCurrent,
   isStale,
+  staleReasons,
 } from "./src/components/announcement/lib/sectionLifecycle";
 import { SummaryAccepted } from "./src/components/announcement/announcementTypes";
 import { buildAnnouncementSnapshot, isAnnouncementSnapshotExportable } from "./src/components/announcement/announcementSnapshot";
@@ -34,6 +35,7 @@ function assert(cond: boolean, msg: string) {
 
 type Ws = ReturnType<typeof createEmptySectionWorkspace<SummaryAccepted, SummaryAccepted>>;
 const meta = { title: "T", announcementNumber: "WCF-AN 2026-01", inTouchId: "1", date: "d", gemsNo: "N/A", classification: "SLB-Private" };
+const supportingContent = { figures: [] };
 
 console.log("\nSection lifecycle:");
 {
@@ -64,10 +66,12 @@ console.log("\nSection lifecycle:");
   assert(ws.accepted?.value.renderedText === "A polished paragraph." && ws.accepted.source === "ai", "accept promotes suggestion to accepted (source ai)");
   assert(ws.suggestion.value === null, "accept clears the pending suggestion");
   assert(!isStale(ws), "freshly accepted content is not stale");
+  assert(staleReasons(ws).length === 0, "freshly accepted content has no stale reasons");
 
   // editing raw after acceptance stales, does not delete
   const wsAfterEdit = editRaw(ws, "changed source after acceptance");
   assert(wsAfterEdit.accepted !== null && isStale(wsAfterEdit), "editing raw after acceptance keeps accepted but marks stale");
+  assert(isStale(wsAfterEdit) === (staleReasons(wsAfterEdit).length > 0), "isStale agrees with staleReasons after editRaw");
 
   // editComponents drops any pending suggestion
   const wsWithPending = applySuggestion(beginRequest(beforeAccept, "x"), { centralMessage: "y" }, "x");
@@ -99,32 +103,32 @@ function view(p: any = {}) { return { summary: okSummary, reason: okReason, acti
 
 console.log("\nReadiness:");
 {
-  const r1 = computeAnnouncementReadiness({ metadata: meta, sections: view({ summary: { accepted: null, freshness: "fresh" } }) });
+  const r1 = computeAnnouncementReadiness({ metadata: meta, supportingContent, sections: view({ summary: { accepted: null, freshness: "fresh" } }) });
   assert(r1.status === "Blocked" && r1.blockingIssues.some((i) => /summary has no accepted/i.test(i)), "no accepted Summary => Blocked");
 
-  const r2 = computeAnnouncementReadiness({ metadata: meta, sections: view() });
+  const r2 = computeAnnouncementReadiness({ metadata: meta, supportingContent, sections: view() });
   assert(r2.blockingIssues.length === 0, "all sections accepted + title => not blocked");
 
-  const r3 = computeAnnouncementReadiness({ metadata: meta, sections: view({ summary: { accepted: { value: { centralMessage: "hello" } }, freshness: "stale" } }) });
-  assert(r3.status === "Blocked" && r3.blockingIssues.some((i) => /summary was edited/i.test(i)), "stale accepted Summary => Blocked");
+  const r3 = computeAnnouncementReadiness({ metadata: meta, supportingContent, sections: view({ summary: { accepted: { value: { centralMessage: "hello" } }, freshness: "stale" } }) });
+  assert(r3.status === "Blocked" && r3.blockingIssues.some((i) => /summary is accepted but needs another look/i.test(i)), "stale accepted Summary => Blocked");
 
-  const noTitle = computeAnnouncementReadiness({ metadata: { ...meta, title: "" }, sections: view() });
+  const noTitle = computeAnnouncementReadiness({ metadata: { ...meta, title: "" }, supportingContent, sections: view() });
   assert(noTitle.blockingIssues.some((i) => /title/i.test(i)), "missing title => Blocked");
 
-  const noReason = computeAnnouncementReadiness({ metadata: meta, sections: view({ reason: { accepted: null, freshness: "fresh" } }) });
+  const noReason = computeAnnouncementReadiness({ metadata: meta, supportingContent, sections: view({ reason: { accepted: null, freshness: "fresh" } }) });
   assert(noReason.blockingIssues.some((i) => /reason has no accepted/i.test(i)), "no accepted Reason => Blocked");
 
-  const noAction = computeAnnouncementReadiness({ metadata: meta, sections: view({ action: { accepted: null, freshness: "fresh" } }) });
+  const noAction = computeAnnouncementReadiness({ metadata: meta, supportingContent, sections: view({ action: { accepted: null, freshness: "fresh" } }) });
   assert(noAction.blockingIssues.some((i) => /action has no accepted/i.test(i)), "no accepted Action => Blocked");
 }
 
 console.log("\nSnapshot (review == export source):");
 {
-  const snap = buildAnnouncementSnapshot({ metadata: meta, sections: view({ summary: { accepted: { value: { centralMessage: "msg", renderedText: "Para." } }, freshness: "fresh" } }) });
+  const snap = buildAnnouncementSnapshot({ metadata: meta, supportingContent, sections: view({ summary: { accepted: { value: { centralMessage: "msg", renderedText: "Para." } }, freshness: "fresh" } }) });
   assert(snap.summary?.renderedText === "Para.", "snapshot reads accepted summary value");
   assert(isAnnouncementSnapshotExportable(snap) === (snap.readiness.blockingIssues.length === 0), "isExportable agrees with readiness blocking issues");
 
-  const blockedSnap = buildAnnouncementSnapshot({ metadata: { ...meta, title: "" }, sections: view() });
+  const blockedSnap = buildAnnouncementSnapshot({ metadata: { ...meta, title: "" }, supportingContent, sections: view() });
   assert(!isAnnouncementSnapshotExportable(blockedSnap), "snapshot not exportable when readiness blocks");
 }
 

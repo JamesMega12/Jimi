@@ -1,6 +1,9 @@
 import { Document, Paragraph, TextRun, HeadingLevel, Packer, Table, TableRow, TableCell, BorderStyle, WidthType, AlignmentType, ShadingType, VerticalAlign } from "docx";
 import { AnnouncementSnapshot } from "../components/announcement/announcementTypes";
-import { actionItemLine } from "../components/announcement/announcementActionRender";
+import { ACTION_KIND_LABELS, actionItemMeta } from "../components/announcement/announcementActionRender";
+import { parseRichText, RichBlock } from "../components/announcement/richTextMarkup";
+import { renderRichBlocksToDocxParagraphs, renderRichTextToDocxParagraphs, spansToRuns } from "./announcementRichTextDocx";
+import { ANNOUNCEMENT_FIGURES_ENABLED } from "../components/announcement/announcementFeatureFlags";
 
 // Announcement DOCX exporter -- consumes ONLY the canonical AnnouncementSnapshot
 // (never a raw draft), the SAME snapshot the frontend review renders, so what
@@ -51,16 +54,15 @@ export async function generateAnnouncementDocx(snapshot: AnnouncementSnapshot): 
     const s = snapshot.summary;
     if (s.renderedText && s.renderedText.trim()) {
       // Cohesive paragraph produced by rewrite -- the intended default. Falls
-      // back to the field list only when no rewrite ran (manual accept).
-      s.renderedText.split(/\n{2,}/).forEach((para) => {
-        const t = para.trim();
-        if (t) sections.push(new Paragraph({ text: t, spacing: { after: 200 } }));
-      });
+      // back to the field list only when no rewrite ran (manual accept). Rich
+      // markup (bold/italic/links/nested bullets) renders as real Word
+      // formatting, not literal **/[]() characters.
+      sections.push(...renderRichTextToDocxParagraphs(s.renderedText));
     } else {
-      pushIfPresent(sections, "", s.centralMessage);
-      pushIfPresent(sections, "Affected Scope:", s.affectedScope);
-      pushIfPresent(sections, "Impact:", s.impact);
-      pushIfPresent(sections, "Implementation Timing:", s.implementationTiming);
+      pushRichIfPresent(sections, "", s.centralMessage);
+      pushRichIfPresent(sections, "Affected Scope:", s.affectedScope);
+      pushRichIfPresent(sections, "Impact:", s.impact);
+      pushRichIfPresent(sections, "Implementation Timing:", s.implementationTiming);
     }
   }
 
@@ -68,25 +70,62 @@ export async function generateAnnouncementDocx(snapshot: AnnouncementSnapshot): 
     sections.push(heading("REASON"));
     const r = snapshot.reason;
     if (r.renderedText && r.renderedText.trim()) {
-      r.renderedText.split(/\n{2,}/).forEach((para) => {
-        const t = para.trim();
-        if (t) sections.push(new Paragraph({ text: t, spacing: { after: 200 } }));
-      });
+      sections.push(...renderRichTextToDocxParagraphs(r.renderedText));
     } else {
-      pushIfPresent(sections, "", r.rationale);
-      pushIfPresent(sections, "Triggering Observation:", r.triggeringObservation);
+      pushRichIfPresent(sections, "", r.rationale);
+      pushRichIfPresent(sections, "Triggering Observation:", r.triggeringObservation);
     }
     // Certainty tag is printed only when a cause is actually asserted, so a
     // rationale/objectives-style Reason never shows a spurious "Cause Status".
+    // Plain -- an enum value, never markup.
     if (r.causeStatus) pushIfPresent(sections, "Cause Status:", r.causeStatus);
   }
 
   if (snapshot.action) {
     sections.push(heading("ACTION"));
     const a = snapshot.action;
-    if (a.lead && a.lead.trim()) sections.push(new Paragraph({ text: a.lead.trim(), spacing: { after: 120 } }));
+    if (a.lead && a.lead.trim()) sections.push(...renderRichTextToDocxParagraphs(a.lead.trim()));
     a.items.forEach((item) => {
-      sections.push(new Paragraph({ text: actionItemLine(item), bullet: { level: 0 }, spacing: { after: 60 } }));
+      // The kind label stays a plain bold prefix (never itself markup); the
+      // item's own text is rich-parsed so bold/italic/links/nested "- "
+      // sub-bullets (e.g. a "Mandatory X:" item with its own sub-steps)
+      // render as real Word formatting and structure, not literal characters.
+      const label = new TextRun({ text: `${ACTION_KIND_LABELS[item.kind]}: `, bold: true });
+      const meta = actionItemMeta(item);
+      const blocks = parseRichText(item.text);
+      const first = blocks.length > 0 ? blocks[0] : null;
+      const isFirstParagraph = first !== null && first.type === "paragraph";
+
+      if (isFirstParagraph) {
+        const spans = (first as Extract<RichBlock, { type: "paragraph" }>).spans;
+        const metaRun = meta ? [new TextRun({ text: meta, color: "666666" })] : [];
+        sections.push(
+          new Paragraph({ children: [label, ...spansToRuns(spans), ...metaRun], bullet: { level: 0 }, spacing: { after: 60 } })
+        );
+        if (blocks.length > 1) sections.push(...renderRichBlocksToDocxParagraphs(blocks.slice(1), 1));
+      } else {
+        sections.push(new Paragraph({ children: [label], bullet: { level: 0 }, spacing: { after: 60 } }));
+        if (blocks.length > 0) sections.push(...renderRichBlocksToDocxParagraphs(blocks, 1));
+        if (meta.trim()) {
+          sections.push(new Paragraph({ children: [new TextRun({ text: meta.trim(), color: "666666" })], spacing: { after: 60 } }));
+        }
+      }
+    });
+  }
+
+  // Numbered caption placeholders, not embedded images -- mirrors Technical
+  // Alert v2's technicalAlertDocxExportServiceV2.ts. The author pastes the
+  // real image in after export.
+  if (ANNOUNCEMENT_FIGURES_ENABLED && snapshot.supportingContent.figures.length > 0) {
+    sections.push(heading("FIGURES"));
+    snapshot.supportingContent.figures.forEach((f) => {
+      sections.push(
+        new Paragraph({
+          children: [new TextRun({ text: `[FIGURE ${f.number}: ${f.caption || "Untitled"}]`, bold: true })],
+          alignment: AlignmentType.CENTER,
+          spacing: { after: 100 },
+        })
+      );
     });
   }
 
@@ -110,6 +149,25 @@ function pushIfPresent(sections: (Paragraph | Table)[], label: string, value: st
       ? [new TextRun({ text: label + " ", bold: true }), new TextRun({ text: value })]
       : [new TextRun({ text: value })];
     sections.push(new Paragraph({ children, spacing: { after: 100 } }));
+  }
+}
+
+/** Same as pushIfPresent, but the value is rich-parsed so manually-typed
+ * bold/italic/link markup renders as real Word formatting. */
+function pushRichIfPresent(sections: (Paragraph | Table)[], label: string, value: string | undefined) {
+  if (!value || !value.trim()) return;
+  const blocks = parseRichText(value);
+  if (label && blocks.length > 0 && blocks[0].type === "paragraph") {
+    sections.push(
+      new Paragraph({
+        children: [new TextRun({ text: label + " ", bold: true }), ...spansToRuns(blocks[0].spans)],
+        spacing: { after: 100 },
+      })
+    );
+    sections.push(...renderRichBlocksToDocxParagraphs(blocks.slice(1)));
+  } else {
+    if (label) sections.push(new Paragraph({ children: [new TextRun({ text: label, bold: true })], spacing: { after: 60 } }));
+    sections.push(...renderRichBlocksToDocxParagraphs(blocks));
   }
 }
 

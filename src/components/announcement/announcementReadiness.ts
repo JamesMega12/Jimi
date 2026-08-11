@@ -3,24 +3,44 @@
 // document-control metadata. Phase 1 scope: Summary + title only (Reason/Action
 // checks are added when those sections land).
 
-import { ActionAccepted, AnnouncementAcceptedSectionsView, AnnouncementMetadata, Readiness, ReasonAccepted, SummaryAccepted } from "./announcementTypes";
+import { ActionAccepted, AnnouncementAcceptedSectionsView, AnnouncementMetadata, Readiness, ReasonAccepted, SectionAcceptedView, SummaryAccepted, SupportingContent } from "./announcementTypes";
+import { staleReasons } from "./lib/sectionLifecycle";
+import { describeStaleReasons } from "./announcementStaleReasonCopy";
 
 export interface ReadinessInput {
   metadata: AnnouncementMetadata;
   sections: AnnouncementAcceptedSectionsView;
+  // Threaded through so buildAnnouncementSnapshot can populate the snapshot,
+  // but never read here -- figures are always optional, never blocking
+  // (matches Technical Alert v2's readiness.ts, which never references
+  // supportingContent.figures either).
+  supportingContent: SupportingContent;
 }
 
-function summaryHasContent(value: SummaryAccepted | undefined | null): boolean {
+// Announcement has one stale cause ('self-edit') today, always blocking; no
+// warning-only stale cause exists because no neighbor-synthesis construct
+// exists yet (see the parity plan's neighbor-change scoping decision, and
+// lib/sectionLifecycle.ts's header comment). Shaped so a warn branch can be
+// added later without restructuring -- mirrors Technical Alert v2's
+// hasBlockingStale/hasNeighborStale split in readiness.ts.
+function staleBlockingMessage(label: string, view: Pick<SectionAcceptedView<unknown>, "freshness">): string | null {
+  const codes = staleReasons(view);
+  if (codes.length === 0) return null;
+  const clauses = describeStaleReasons(view);
+  return `${label} is accepted but needs another look (${clauses.join("; ")}) -- re-accept before export.`;
+}
+
+export function summaryHasContent(value: SummaryAccepted | undefined | null): boolean {
   if (!value) return false;
   return !!(value.renderedText?.trim() || value.centralMessage?.trim());
 }
 
-function reasonHasContent(value: ReasonAccepted | undefined | null): boolean {
+export function reasonHasContent(value: ReasonAccepted | undefined | null): boolean {
   if (!value) return false;
   return !!(value.renderedText?.trim() || value.rationale?.trim());
 }
 
-function actionHasContent(value: ActionAccepted | undefined | null): boolean {
+export function actionHasContent(value: ActionAccepted | undefined | null): boolean {
   if (!value) return false;
   return value.items.some((i) => i.text?.trim()) || !!value.lead?.trim();
 }
@@ -40,8 +60,9 @@ export function computeAnnouncementReadiness(input: ReadinessInput): Readiness {
 
   // Blocking: accepted content must not be stale (source/components edited
   // after acceptance -- review before export).
-  if (summary.accepted && summary.freshness === "stale") {
-    blockingIssues.push("Summary was edited after acceptance and is stale -- re-accept before export.");
+  if (summary.accepted) {
+    const msg = staleBlockingMessage("Summary", summary);
+    if (msg) blockingIssues.push(msg);
   }
 
   const reason = input.sections.reason;
@@ -53,8 +74,9 @@ export function computeAnnouncementReadiness(input: ReadinessInput): Readiness {
   } else if (!reasonHasContent(reason.accepted.value)) {
     blockingIssues.push("Accepted Reason is empty.");
   }
-  if (reason.accepted && reason.freshness === "stale") {
-    blockingIssues.push("Reason was edited after acceptance and is stale -- re-accept before export.");
+  if (reason.accepted) {
+    const msg = staleBlockingMessage("Reason", reason);
+    if (msg) blockingIssues.push(msg);
   }
 
   const action = input.sections.action;
@@ -65,8 +87,9 @@ export function computeAnnouncementReadiness(input: ReadinessInput): Readiness {
   } else if (!actionHasContent(action.accepted.value)) {
     blockingIssues.push("Accepted Action is empty.");
   }
-  if (action.accepted && action.freshness === "stale") {
-    blockingIssues.push("Action was edited after acceptance and is stale -- re-accept before export.");
+  if (action.accepted) {
+    const msg = staleBlockingMessage("Action", action);
+    if (msg) blockingIssues.push(msg);
   }
 
   // Blocking: document-control minimum.

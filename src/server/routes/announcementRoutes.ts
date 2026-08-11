@@ -232,13 +232,13 @@ announcementRoutes.post("/action/rewrite", async (req, res) => {
 
 announcementRoutes.post("/export-docx", async (req, res) => {
   try {
-    const { documentType, metadata, sections } = req.body;
+    const { documentType, metadata, sections, supportingContent } = req.body;
     if (documentType !== "Announcement") return res.status(400).json({ error: "Invalid document type" });
     if (!metadata || !sections) return res.status(400).json({ error: "metadata and sections are required." });
 
     // Server rebuilds the snapshot itself from the submitted accepted-only
     // section state -- it never trusts a client-constructed snapshot object.
-    const snapshot = buildAnnouncementSnapshot({ metadata, sections });
+    const snapshot = buildAnnouncementSnapshot({ metadata, sections, supportingContent: supportingContent ?? { figures: [] } });
     if (!isAnnouncementSnapshotExportable(snapshot)) {
       return res.status(422).json({
         error: `Document is not ready for export: ${snapshot.readiness.blockingIssues.join(" ")}`,

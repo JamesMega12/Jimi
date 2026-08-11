@@ -170,6 +170,24 @@ export interface AnnouncementMetadata {
   classification: string;
 }
 
+// --- Supporting content (figures) ---------------------------------------------
+//
+// Numbered caption placeholders, not embedded images -- mirrors Technical
+// Alert v2's actual SupportingContent.figures (technical-alert/v2/types.ts):
+// no image bytes/upload anywhere in this codebase for either module. An
+// author adds a placeholder with a caption; the real image gets pasted into
+// the exported .docx afterward. Always optional, never blocking in readiness.
+
+export interface Figure {
+  id: string;
+  number: number;
+  caption: string;
+}
+
+export interface SupportingContent {
+  figures: Figure[];
+}
+
 // --- Draft -------------------------------------------------------------------
 
 export interface AnnouncementSections {
@@ -184,6 +202,7 @@ export interface AnnouncementDraft {
   identity: { id: string; createdAt: string };
   metadata: AnnouncementMetadata;
   sections: AnnouncementSections;
+  supportingContent: SupportingContent;
   workflow: { currentStage: WorkflowStage };
 }
 
@@ -222,5 +241,6 @@ export interface AnnouncementSnapshot {
   summary: SummaryAccepted | null;
   reason: ReasonAccepted | null;
   action: ActionAccepted | null;
+  supportingContent: SupportingContent;
   readiness: Readiness;
 }
