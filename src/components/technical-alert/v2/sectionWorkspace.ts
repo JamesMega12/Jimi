@@ -6,7 +6,13 @@
 // Acceptance Model" / "Freshness and Dependency Model" for the behavior spec
 // each function below implements.
 
-import { Finding, RevisionRef, SectionWorkspace } from './types';
+import { ControlInfoField, Finding, RevisionRef, SectionId, SectionWorkspace } from './types';
+
+function union<T>(existing: T[] | undefined, incoming: T[]): T[] {
+  const out = [...(existing ?? [])];
+  incoming.forEach(x => { if (!out.includes(x)) out.push(x); });
+  return out;
+}
 
 export function createEmptySectionWorkspace<TComponents, TAccepted>(
   initialComponents: TComponents | null = null
@@ -149,7 +155,9 @@ export function acceptSuggestion<TComponents, TAccepted>(
     suggestion: { value: null, basedOn: null, requestId: null },
     freshness: 'fresh',
     staleDueToControlChange: false,
+    staleControlFields: undefined,
     staleDueToNeighborChange: false,
+    staleNeighborSections: undefined,
   };
 }
 
@@ -166,7 +174,9 @@ export function manualAccept<TComponents, TAccepted>(
     suggestion: { value: null, basedOn: null, requestId: null },
     freshness: 'fresh',
     staleDueToControlChange: false,
+    staleControlFields: undefined,
     staleDueToNeighborChange: false,
+    staleNeighborSections: undefined,
   };
 }
 
@@ -183,33 +193,74 @@ export function editAcceptedDirectly<TComponents, TAccepted>(
     accepted: { ...ws.accepted, value, basedOn: ws.currentRevision, acceptedAt: now },
     freshness: 'fresh',
     staleDueToControlChange: false,
+    staleControlFields: undefined,
     staleDueToNeighborChange: false,
+    staleNeighborSections: undefined,
   };
 }
 
 /** A tracked control-info field (deadline/actionBy/effectiveTiming) changed
  * elsewhere in the draft. Marks accepted content stale for a distinct reason
- * from a raw/component edit, so the UI can explain "why" differently. */
+ * from a raw/component edit, so the UI can explain "why" differently. Records
+ * which field(s) drove it (unioned with any already recorded) so the UI can
+ * name them. */
 export function markStaleDueToControlChange<TComponents, TAccepted>(
-  ws: SectionWorkspace<TComponents, TAccepted>
+  ws: SectionWorkspace<TComponents, TAccepted>,
+  changedFields: ControlInfoField[] = []
 ): SectionWorkspace<TComponents, TAccepted> {
   if (!ws.accepted) return ws;
-  return { ...ws, staleDueToControlChange: true };
+  return {
+    ...ws,
+    staleDueToControlChange: true,
+    staleControlFields: union(ws.staleControlFields, changedFields),
+  };
 }
 
 /** A neighbor section this content was AI-grounded on (see
  * SummaryAccepted.groundedOnNeighbors) was re-accepted with different
  * content. Same "distinct cause from a raw/component edit" rationale as
- * markStaleDueToControlChange (RC7, 2026-08-06). */
+ * markStaleDueToControlChange (RC7, 2026-08-06). Records which neighbor(s)
+ * changed (unioned) so the UI can name them. */
 export function markStaleDueToNeighborChange<TComponents, TAccepted>(
-  ws: SectionWorkspace<TComponents, TAccepted>
+  ws: SectionWorkspace<TComponents, TAccepted>,
+  changedSections: SectionId[] = []
 ): SectionWorkspace<TComponents, TAccepted> {
   if (!ws.accepted) return ws;
-  return { ...ws, staleDueToNeighborChange: true };
+  return {
+    ...ws,
+    staleDueToNeighborChange: true,
+    staleNeighborSections: union(ws.staleNeighborSections, changedSections),
+  };
 }
 
+// Structured cause of staleness. The domain layer returns these codes (never
+// user-facing prose) so the single source of *which* reasons are active stays
+// separate from the single source of *wording* (staleReasonCopy.ts) -- and so
+// this framework-free module never carries UI copy. Order below is canonical.
+export type StaleReasonCode = 'self-edit' | 'control-change' | 'neighbor-change';
+
+// Minimal structural shape staleReasons() needs, so it works unchanged against
+// both the full SectionWorkspace<T,U> and the narrower SectionAcceptedView used
+// by readiness.ts -- no duplication of the OR, no new generics.
+interface StalenessFlags {
+  freshness: 'fresh' | 'stale';
+  staleDueToControlChange: boolean;
+  staleDueToNeighborChange: boolean;
+}
+
+export function staleReasons(ws: StalenessFlags): StaleReasonCode[] {
+  const reasons: StaleReasonCode[] = [];
+  if (ws.freshness === 'stale') reasons.push('self-edit');
+  if (ws.staleDueToControlChange) reasons.push('control-change');
+  if (ws.staleDueToNeighborChange) reasons.push('neighbor-change');
+  return reasons;
+}
+
+// Derived from staleReasons() so the two can never drift; the boolean result is
+// identical to the previous inline OR, so every existing caller (checkmark
+// gating, badge color, accepted-card styling) is unaffected.
 export function isStale<TComponents, TAccepted>(ws: SectionWorkspace<TComponents, TAccepted>): boolean {
-  return ws.freshness === 'stale' || ws.staleDueToControlChange || ws.staleDueToNeighborChange;
+  return staleReasons(ws).length > 0;
 }
 
 /** Stale-response guard: a response is only current if its requestId matches
