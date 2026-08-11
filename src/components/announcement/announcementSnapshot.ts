@@ -19,6 +19,7 @@ export function buildAnnouncementSnapshot(input: ReadinessInput): AnnouncementSn
     summary: input.sections.summary.accepted?.value ?? null,
     reason: input.sections.reason.accepted?.value ?? null,
     action: input.sections.action.accepted?.value ?? null,
+    supportingContent: input.supportingContent,
     readiness,
   };
 }

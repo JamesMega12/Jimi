@@ -36,6 +36,9 @@ export function loadAnnouncementState(): { draft: AnnouncementDraft; stage: Work
       reason: sanitizeSection(d.sections.reason),
       action: sanitizeSection(d.sections.action),
     };
+    // Backward compat: drafts persisted before figures shipped have no
+    // supportingContent field at all.
+    d.supportingContent = d.supportingContent ?? { figures: [] };
     return { draft: d, stage: parsed.stage ?? "drafting" };
   } catch {
     return null; // corrupt / old schema / unavailable -> fresh start

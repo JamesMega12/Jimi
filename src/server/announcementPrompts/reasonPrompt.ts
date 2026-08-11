@@ -65,6 +65,15 @@ STYLE: plain, professional, short sentences, consistent terminology, no
 contractions. Preserve exact identifiers (part numbers, InTouch IDs, standards)
 verbatim.
 
+FORMATTING
+If the source lists several distinct reasons/benefits as a bulleted list
+(rather than flowing prose), preserve that structure in "renderedText" using
+lines starting with "- " (one level of nested "- " sub-bullets is supported
+for a sub-list under one bullet). If the source uses meaningful emphasis
+(bold/italic) or a hyperlink on a term, preserve it using **bold**, *italic*,
+[link text](url). Never invent structure, emphasis, or a link the source
+doesn't have.
+
 OUTPUT SCHEMA
 Return JSON matching exactly: { "renderedText": string, "rationale", "triggeringObservation"?, "causeStatus"? }
 `;

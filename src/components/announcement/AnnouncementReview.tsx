@@ -1,7 +1,10 @@
 import React from "react";
-import { AlertCircle, CheckCircle2, Download, Loader2, AlertTriangle } from "lucide-react";
+import { AlertCircle, CheckCircle2, Download, Loader2 } from "lucide-react";
 import { AnnouncementSnapshot } from "./announcementTypes";
 import { ACTION_KIND_LABELS, actionItemMeta } from "./announcementActionRender";
+import AnnouncementReadinessPanel from "./AnnouncementReadinessPanel";
+import { RichTextContent } from "./RichTextContent";
+import { ANNOUNCEMENT_FIGURES_ENABLED } from "./announcementFeatureFlags";
 
 // Read-only final review. Renders ONLY the canonical AnnouncementSnapshot -- the
 // exact same object the backend export route rebuilds and prints -- so what is
@@ -14,26 +17,29 @@ interface Props {
   exportError: string | null;
 }
 
-function Prose({ text }: { text: string }) {
-  return (
-    <div className="space-y-2">
-      {text.split(/\n{2,}/).map((p, i) => (
-        <p key={i} className="text-sm leading-relaxed text-slate-700">{p.trim()}</p>
-      ))}
-    </div>
-  );
-}
-
 function SummaryBlock({ snapshot }: { snapshot: AnnouncementSnapshot }) {
   const s = snapshot.summary;
   if (!s) return <p className="text-sm text-slate-400 italic">No accepted Summary yet.</p>;
-  if (s.renderedText && s.renderedText.trim()) return <Prose text={s.renderedText} />;
+  if (s.renderedText && s.renderedText.trim()) return <RichTextContent text={s.renderedText} />;
   return (
     <div className="text-sm space-y-1 text-slate-700">
-      {s.centralMessage && <p>{s.centralMessage}</p>}
-      {s.affectedScope && <div><strong>Affected Scope:</strong> {s.affectedScope}</div>}
-      {s.impact && <div><strong>Impact:</strong> {s.impact}</div>}
-      {s.implementationTiming && <div><strong>Implementation Timing:</strong> {s.implementationTiming}</div>}
+      {s.centralMessage && <RichTextContent text={s.centralMessage} className="space-y-1" />}
+      {s.affectedScope && (
+        <div>
+          <strong>Affected Scope:</strong> <RichTextContent text={s.affectedScope} className="inline space-y-1" />
+        </div>
+      )}
+      {s.impact && (
+        <div>
+          <strong>Impact:</strong> <RichTextContent text={s.impact} className="inline space-y-1" />
+        </div>
+      )}
+      {s.implementationTiming && (
+        <div>
+          <strong>Implementation Timing:</strong>{" "}
+          <RichTextContent text={s.implementationTiming} className="inline space-y-1" />
+        </div>
+      )}
     </div>
   );
 }
@@ -44,11 +50,16 @@ function ReasonBlock({ snapshot }: { snapshot: AnnouncementSnapshot }) {
   return (
     <div className="space-y-1">
       {r.renderedText && r.renderedText.trim() ? (
-        <Prose text={r.renderedText} />
+        <RichTextContent text={r.renderedText} />
       ) : (
         <div className="text-sm space-y-1 text-slate-700">
-          {r.rationale && <p>{r.rationale}</p>}
-          {r.triggeringObservation && <div><strong>Triggering Observation:</strong> {r.triggeringObservation}</div>}
+          {r.rationale && <RichTextContent text={r.rationale} className="space-y-1" />}
+          {r.triggeringObservation && (
+            <div>
+              <strong>Triggering Observation:</strong>{" "}
+              <RichTextContent text={r.triggeringObservation} className="inline space-y-1" />
+            </div>
+          )}
         </div>
       )}
       {r.causeStatus && (
@@ -65,15 +76,33 @@ function ActionBlock({ snapshot }: { snapshot: AnnouncementSnapshot }) {
   if (!a) return <p className="text-sm text-slate-400 italic">No accepted Action yet.</p>;
   return (
     <div className="space-y-1.5 text-sm text-slate-700">
-      {a.lead && a.lead.trim() && <p className="leading-relaxed">{a.lead.trim()}</p>}
+      {a.lead && a.lead.trim() && <RichTextContent text={a.lead.trim()} className="space-y-1" />}
       <ul className="space-y-1">
         {a.items.map((item) => (
           <li key={item.id} className="flex gap-2">
-            <span className="text-slate-400">•</span>
-            <span>
-              <strong>{ACTION_KIND_LABELS[item.kind]}:</strong> {item.text}
+            <span className="text-slate-400 flex-shrink-0">•</span>
+            <div className="flex-1">
+              <strong>{ACTION_KIND_LABELS[item.kind]}:</strong>{" "}
+              <RichTextContent text={item.text} className="inline space-y-1" />
               <span className="text-slate-500">{actionItemMeta(item)}</span>
-            </span>
+            </div>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+function FiguresBlock({ snapshot }: { snapshot: AnnouncementSnapshot }) {
+  const figures = snapshot.supportingContent.figures;
+  if (!ANNOUNCEMENT_FIGURES_ENABLED || figures.length === 0) return null;
+  return (
+    <div>
+      <h3 className="font-bold text-slate-800 mb-1">FIGURES</h3>
+      <ul className="space-y-1 text-sm text-slate-700">
+        {figures.map((f) => (
+          <li key={f.id} className="font-semibold text-center">
+            [FIGURE {f.number}: {f.caption || "Untitled"}]
           </li>
         ))}
       </ul>
@@ -87,31 +116,7 @@ export default function AnnouncementReview({ snapshot, onExport, exporting, expo
 
   return (
     <div className="space-y-4">
-      {/* Readiness */}
-      <div className={`p-4 rounded-lg border ${canExport ? "bg-emerald-50 border-emerald-200" : "bg-amber-50 border-amber-200"}`}>
-        <h3 className={`font-bold flex items-center gap-2 ${canExport ? "text-emerald-900" : "text-amber-900"}`}>
-          {canExport ? <CheckCircle2 className="w-5 h-5" /> : <AlertCircle className="w-5 h-5" />}
-          Readiness: {readiness.status}
-        </h3>
-        {readiness.blockingIssues.length > 0 && (
-          <ul className="mt-2 space-y-1">
-            {readiness.blockingIssues.map((issue, i) => (
-              <li key={i} className="text-sm text-red-800 flex items-start gap-1.5">
-                <AlertCircle className="w-3.5 h-3.5 flex-shrink-0 mt-0.5" /> {issue}
-              </li>
-            ))}
-          </ul>
-        )}
-        {readiness.warnings.length > 0 && (
-          <ul className="mt-2 space-y-1">
-            {readiness.warnings.map((w, i) => (
-              <li key={i} className="text-sm text-amber-800 flex items-start gap-1.5">
-                <AlertTriangle className="w-3.5 h-3.5 flex-shrink-0 mt-0.5" /> {w}
-              </li>
-            ))}
-          </ul>
-        )}
-      </div>
+      <AnnouncementReadinessPanel readiness={readiness} />
 
       {/* Document preview */}
       <div className="bg-white border border-slate-200 rounded-lg p-6 space-y-4">
@@ -135,6 +140,7 @@ export default function AnnouncementReview({ snapshot, onExport, exporting, expo
           <h3 className="font-bold text-slate-800 mb-1">ACTION</h3>
           <ActionBlock snapshot={snapshot} />
         </div>
+        <FiguresBlock snapshot={snapshot} />
       </div>
 
       {exportError && (

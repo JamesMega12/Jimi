@@ -14,6 +14,7 @@ function assert(cond: boolean, msg: string) {
 }
 
 const meta = { title: "T", announcementNumber: "WCF-AN 2026-02", inTouchId: "1", date: "d", gemsNo: "N/A", classification: "SLB-Private" };
+const supportingContent = { figures: [] };
 const okSummary = { accepted: { value: { centralMessage: "m", renderedText: "M." } }, freshness: "fresh" as const };
 
 console.log("\nnormalizeReasonResult:");
@@ -57,19 +58,19 @@ function view(p: any = {}) { return { summary: okSummary, reason: { accepted: { 
 
 console.log("\nReason readiness + snapshot:");
 {
-  const noReason = computeAnnouncementReadiness({ metadata: meta, sections: view({ reason: { accepted: null, freshness: "fresh" } }) });
+  const noReason = computeAnnouncementReadiness({ metadata: meta, supportingContent, sections: view({ reason: { accepted: null, freshness: "fresh" } }) });
   assert(noReason.status === "Blocked" && noReason.blockingIssues.some((i) => /reason has no accepted/i.test(i)), "no accepted Reason => Blocked");
 
-  const ok = computeAnnouncementReadiness({ metadata: meta, sections: view({ reason: { accepted: { value: { rationale: "r", renderedText: "R." } }, freshness: "fresh" } }) });
+  const ok = computeAnnouncementReadiness({ metadata: meta, supportingContent, sections: view({ reason: { accepted: { value: { rationale: "r", renderedText: "R." } }, freshness: "fresh" } }) });
   assert(ok.blockingIssues.length === 0, "all sections accepted + title => not blocked");
 
-  const staleReason = computeAnnouncementReadiness({ metadata: meta, sections: view({ reason: { accepted: { value: { rationale: "r" } }, freshness: "stale" } }) });
-  assert(staleReason.blockingIssues.some((i) => /reason was edited/i.test(i)), "stale accepted Reason => Blocked");
+  const staleReason = computeAnnouncementReadiness({ metadata: meta, supportingContent, sections: view({ reason: { accepted: { value: { rationale: "r" } }, freshness: "stale" } }) });
+  assert(staleReason.blockingIssues.some((i) => /reason is accepted but needs another look/i.test(i)), "stale accepted Reason => Blocked");
 
-  const suspectedNoObs = computeAnnouncementReadiness({ metadata: meta, sections: view({ reason: { accepted: { value: { rationale: "r", causeStatus: "suspected" } }, freshness: "fresh" } }) });
+  const suspectedNoObs = computeAnnouncementReadiness({ metadata: meta, supportingContent, sections: view({ reason: { accepted: { value: { rationale: "r", causeStatus: "suspected" } }, freshness: "fresh" } }) });
   assert(suspectedNoObs.warnings.some((w) => /suspected cause/i.test(w)), "suspected cause with no triggering observation => warning");
 
-  const snap = buildAnnouncementSnapshot({ metadata: meta, sections: view({ reason: { accepted: { value: { rationale: "r", renderedText: "Reason prose.", causeStatus: "preliminary" } }, freshness: "fresh" } }) });
+  const snap = buildAnnouncementSnapshot({ metadata: meta, supportingContent, sections: view({ reason: { accepted: { value: { rationale: "r", renderedText: "Reason prose.", causeStatus: "preliminary" } }, freshness: "fresh" } }) });
   assert(snap.reason?.renderedText === "Reason prose." && snap.reason?.causeStatus === "preliminary", "snapshot carries accepted Reason incl. causeStatus");
 }
 

@@ -15,6 +15,7 @@ function assert(cond: boolean, msg: string) {
 }
 
 const meta = { title: "T", announcementNumber: "WCF-AN 2026-01", inTouchId: "1", date: "d", gemsNo: "N/A", classification: "SLB-Private" };
+const supportingContent = { figures: [] };
 const okSummary = { accepted: { value: { centralMessage: "m", renderedText: "M." } }, freshness: "fresh" as const };
 const okReason = { accepted: { value: { rationale: "r" } }, freshness: "fresh" as const };
 
@@ -66,19 +67,19 @@ console.log("\nAction readiness + snapshot:");
   const okAction = { accepted: { value: { items: [{ id: "1", kind: "restriction" as const, text: "Do not order." }] } }, freshness: "fresh" as const };
   const view = (p: any = {}) => ({ summary: okSummary, reason: okReason, action: okAction, ...p });
 
-  const noAction = computeAnnouncementReadiness({ metadata: meta, sections: view({ action: { accepted: null, freshness: "fresh" } }) });
+  const noAction = computeAnnouncementReadiness({ metadata: meta, supportingContent, sections: view({ action: { accepted: null, freshness: "fresh" } }) });
   assert(noAction.status === "Blocked" && noAction.blockingIssues.some((i) => /action has no accepted/i.test(i)), "no accepted Action => Blocked");
 
-  const emptyItems = computeAnnouncementReadiness({ metadata: meta, sections: view({ action: { accepted: { value: { items: [] } }, freshness: "fresh" } }) });
+  const emptyItems = computeAnnouncementReadiness({ metadata: meta, supportingContent, sections: view({ action: { accepted: { value: { items: [] } }, freshness: "fresh" } }) });
   assert(emptyItems.blockingIssues.some((i) => /action is empty/i.test(i)), "accepted Action with no items/lead => Blocked");
 
-  const ok = computeAnnouncementReadiness({ metadata: meta, sections: view() });
+  const ok = computeAnnouncementReadiness({ metadata: meta, supportingContent, sections: view() });
   assert(ok.blockingIssues.length === 0, "all sections accepted + title => not blocked");
 
-  const staleAction = computeAnnouncementReadiness({ metadata: meta, sections: view({ action: { accepted: okAction.accepted, freshness: "stale" } }) });
-  assert(staleAction.blockingIssues.some((i) => /action was edited/i.test(i)), "stale accepted Action => Blocked");
+  const staleAction = computeAnnouncementReadiness({ metadata: meta, supportingContent, sections: view({ action: { accepted: okAction.accepted, freshness: "stale" } }) });
+  assert(staleAction.blockingIssues.some((i) => /action is accepted but needs another look/i.test(i)), "stale accepted Action => Blocked");
 
-  const snap = buildAnnouncementSnapshot({ metadata: meta, sections: view() });
+  const snap = buildAnnouncementSnapshot({ metadata: meta, supportingContent, sections: view() });
   assert(snap.action?.items[0].text === "Do not order.", "snapshot carries accepted Action items");
 }
 

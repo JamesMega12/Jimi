@@ -1,5 +1,6 @@
 import React from "react";
-import { ChevronDown, Sparkles, PenLine } from "lucide-react";
+import { ChevronDown } from "lucide-react";
+import { AnnouncementStalenessDescribable, describeStaleReasons } from "./announcementStaleReasonCopy";
 
 // Small, domain-neutral presentational primitives for the Announcement section
 // workspaces. Module-local copies (teal-themed) rather than imports from the
@@ -10,38 +11,40 @@ export function FieldHint({ text }: { text?: string }) {
   return <p className="text-xs text-slate-500 mt-0.5">{text}</p>;
 }
 
-interface EmptySectionStartProps {
-  sectionLabel: string;
-  hasRawContent: boolean;
-  loading: boolean;
-  onAskAi: () => void;
-  onFillManually: () => void;
+// Explains *why* an accepted section went stale, shared by all three accepted
+// cards. Renders nothing when fresh. Mirrors
+// technical-alert/v2/SectionHelpers.tsx's StaleExplanation: the specific
+// reason(s), what to do, and a reassurance that this is a normal re-confirm,
+// not an error -- re-accepting clears staleness unconditionally.
+function capitalize(s: string): string {
+  return s.charAt(0).toUpperCase() + s.slice(1);
 }
-
-export function EmptySectionStart({ sectionLabel, hasRawContent, loading, onAskAi, onFillManually }: EmptySectionStartProps) {
+export function StaleExplanation({ ws }: { ws: AnnouncementStalenessDescribable }) {
+  const reasons = describeStaleReasons(ws);
+  if (reasons.length === 0) return null;
   return (
-    <div className="p-4 bg-slate-50 border border-dashed border-slate-300 rounded-lg text-center space-y-3">
-      <p className="text-sm text-slate-600">
-        Not sure where to start? Paste some rough notes above and ask AI to help, or fill in {sectionLabel} yourself.
+    <div className="text-xs text-amber-800 mt-1 mb-2 space-y-1">
+      {reasons.length === 1 ? (
+        <p>This section needs another look because {reasons[0]}.</p>
+      ) : (
+        <>
+          <p>This section needs another look because:</p>
+          <ul className="list-disc pl-5">
+            {reasons.map((r, i) => (
+              <li key={i}>{capitalize(r)}.</li>
+            ))}
+          </ul>
+        </>
+      )}
+      <p>
+        <span className="font-semibold">What to do:</span> click &ldquo;Edit / Redraft&rdquo; below,
+        check that the accepted content still matches, then re-accept it.
       </p>
-      <div className="flex justify-center gap-2">
-        <button
-          onClick={onAskAi}
-          disabled={loading || !hasRawContent}
-          title={hasRawContent ? undefined : "Add a few rough notes above first"}
-          className="px-4 py-2 flex items-center gap-2 bg-teal-600 text-white rounded-md text-sm font-medium hover:bg-teal-700 disabled:opacity-50"
-        >
-          <Sparkles className="w-4 h-4" />
-          Ask AI to help
-        </button>
-        <button
-          onClick={onFillManually}
-          className="px-4 py-2 flex items-center gap-2 bg-white border border-slate-300 text-slate-700 rounded-md text-sm font-medium hover:bg-slate-50"
-        >
-          <PenLine className="w-4 h-4" />
-          Fill in manually
-        </button>
-      </div>
+      <p className="text-amber-700">
+        This is normal whenever related details change after you accept &mdash; it&rsquo;s a prompt to
+        re-confirm, not an error. If the content still reads correctly you can re-accept it as-is;
+        nothing has to change.
+      </p>
     </div>
   );
 }

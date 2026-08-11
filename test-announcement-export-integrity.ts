@@ -26,11 +26,12 @@ const view = {
     { id: "3", kind: "long-term" as const, text: "Redesign the tattle tale body." },
   ] } }, freshness: "fresh" as const },
 };
+const supportingContent = { figures: [{ id: "f1", number: 1, caption: "Tattle tale grease fitting" }] };
 // Content that lives ONLY in raw/pending (never accepted) -- must NOT appear in export.
 const PENDING_ONLY = "THIS_IS_PENDING_ONLY_TEXT";
 
 (async () => {
-  const snapshot = buildAnnouncementSnapshot({ metadata: meta, sections: view });
+  const snapshot = buildAnnouncementSnapshot({ metadata: meta, supportingContent, sections: view });
 
   console.log("\nReadiness:");
   assert(isAnnouncementSnapshotExportable(snapshot), "all sections accepted + title => exportable");
@@ -52,11 +53,53 @@ const PENDING_ONLY = "THIS_IS_PENDING_ONLY_TEXT";
   assert(text.includes("Restriction") && text.includes("Short-Term Solution") && text.includes("Long-Term Solution"), "kind labels rendered distinctly");
   assert(text.includes("InTouch 99281"), "per-item reference rendered (the field the legacy exporter dropped)");
 
+  console.log("\nFigures (hidden behind ANNOUNCEMENT_FIGURES_ENABLED -- see test-announcement-figures.ts):");
+  assert(!/FIGURE 1/.test(text) && !text.includes("Tattle tale grease fitting"), "figure placeholder suppressed while the feature flag is off");
+
   console.log("\nNo pending/raw leakage:");
   assert(!text.includes(PENDING_ONLY), "content never accepted does not appear in export");
 
   console.log("\nParity (single source): review view-model === export source:");
   assert(snapshot.summary?.renderedText === "The grease fitting is being redesigned." && snapshot.action?.items.length === 3, "the snapshot object review renders is exactly the one export consumes");
+
+  console.log("\nRich content markup (Phase 5): real Word formatting, not literal characters:");
+  {
+    const markupView = {
+      summary: {
+        accepted: {
+          value: {
+            centralMessage: "CM",
+            renderedText: "The **grease fitting** is being redesigned per [the standard](https://example.com/std).",
+          },
+        },
+        freshness: "fresh" as const,
+      },
+      reason: view.reason,
+      action: {
+        accepted: {
+          value: {
+            items: [
+              {
+                id: "1",
+                kind: "requirement" as const,
+                text: "Mandatory InTrack Recording:\n- All existing iron must be recorded.\n- New iron must be added before use.",
+              },
+            ],
+          },
+        },
+        freshness: "fresh" as const,
+      },
+    };
+    const markupSnapshot = buildAnnouncementSnapshot({ metadata: meta, supportingContent: { figures: [] }, sections: markupView });
+    const markupBuffer = await generateAnnouncementDocx(markupSnapshot);
+    const markupXml = new AdmZip(markupBuffer).readAsText("word/document.xml");
+    const markupText = markupXml.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ");
+
+    assert(markupXml.includes("<w:b/>") && markupText.includes("grease fitting"), "bold markup renders as a real Word bold run");
+    assert(markupXml.includes("<w:hyperlink"), "link markup renders as a real Word hyperlink element");
+    assert(!markupText.includes("**") && !markupText.includes("[the standard]"), "literal ** / [text](url) markup characters do not leak into the exported text");
+    assert(markupText.includes("All existing iron must be recorded.") && markupText.includes("New iron must be added before use."), "a nested sub-bullet inside an action item's text renders both sub-steps");
+  }
 
   console.log(`\n${passed} passed, ${failed} failed\n`);
   process.exit(failed === 0 ? 0 : 1);

@@ -179,8 +179,23 @@ export function editAcceptedDirectly<TComponents, TAccepted>(
   };
 }
 
+// Domain layer of the staleness "explain why" pattern (mirrors Technical Alert
+// v2's sectionWorkspace.ts StaleReasonCode/staleReasons). A 1-member union
+// today: Announcement has no Control-Info construct (no 'control-change'
+// cause) and no cross-section synthesis for any section yet (no
+// 'neighbor-change' cause -- rewrites only ever ground on a section's own raw
+// source, never sibling sections). Shaped as a codes-array, not a boolean, so
+// a 'neighbor-change' member can be added later without restructuring callers.
+export type AnnouncementStaleReasonCode = "self-edit";
+
+export function staleReasons<TComponents, TAccepted>(
+  ws: Pick<SectionWorkspace<TComponents, TAccepted>, "freshness">
+): AnnouncementStaleReasonCode[] {
+  return ws.freshness === "stale" ? ["self-edit"] : [];
+}
+
 export function isStale<TComponents, TAccepted>(ws: SectionWorkspace<TComponents, TAccepted>): boolean {
-  return ws.freshness === "stale";
+  return staleReasons(ws).length > 0;
 }
 
 /** Stale-response guard: a response is only current if its requestId matches

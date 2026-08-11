@@ -71,6 +71,12 @@ STYLE
   verbatim. Preserve source uncertainty -- do not state a suspected or
   preliminary point as confirmed.
 
+FORMATTING
+If the source uses emphasis (bold/italic) or a hyperlink on a term, and that
+emphasis/link is meaningful (not just visual styling), preserve it in
+"renderedText" using this exact minimal markup: **bold**, *italic*,
+[link text](url). Never invent emphasis or a link the source doesn't have.
+
 OUTPUT SCHEMA
 Return JSON matching exactly: { "renderedText": string, "centralMessage", "affectedScope"?, "impact"?, "implementationTiming"? }
 `;

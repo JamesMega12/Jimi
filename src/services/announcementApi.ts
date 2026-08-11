@@ -1,5 +1,5 @@
 import { parseJsonResponse } from "../utils/apiResponse";
-import { SummaryComponents, SummaryAccepted, ReasonComponents, ReasonAccepted, ActionComponents, ActionAccepted, AnnouncementMetadata, AnnouncementAcceptedSectionsView } from "../components/announcement/announcementTypes";
+import { SummaryComponents, SummaryAccepted, ReasonComponents, ReasonAccepted, ActionComponents, ActionAccepted, AnnouncementMetadata, AnnouncementAcceptedSectionsView, SupportingContent } from "../components/announcement/announcementTypes";
 
 // Announcement API client. Uses parseJsonResponse (the HTML/non-JSON guard used
 // across the app) and targets the dedicated /api/announcement/* routes.
@@ -83,12 +83,13 @@ export async function rewriteAction(
 
 export async function exportAnnouncementDocx(
   metadata: AnnouncementMetadata,
-  sections: AnnouncementAcceptedSectionsView
+  sections: AnnouncementAcceptedSectionsView,
+  supportingContent: SupportingContent
 ): Promise<void> {
   const response = await fetch("/api/announcement/export-docx", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ documentType: "Announcement", metadata, sections }),
+    body: JSON.stringify({ documentType: "Announcement", metadata, sections, supportingContent }),
   });
   if (!response.ok) {
     const contentType = response.headers.get("content-type") || "";
